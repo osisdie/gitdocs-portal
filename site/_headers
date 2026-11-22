@@ -2,6 +2,10 @@
   X-Robots-Tag: noindex, nofollow
   X-Content-Type-Options: nosniff
   Referrer-Policy: same-origin
+/
+  Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+/index.html
+  Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 /catalog.json
   Cache-Control: no-cache
 /search-index.json
@@ -10,3 +14,7 @@
   Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads
 /vault.json
   Cache-Control: no-store
+/sw.js
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: no-cache
