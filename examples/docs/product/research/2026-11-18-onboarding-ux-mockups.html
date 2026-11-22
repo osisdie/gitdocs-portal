@@ -1,0 +1,32 @@
+<!--
+  Northwind Labs (fictional) — onboarding UX mockups. Demo content for gitdocs-portal.
+-->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onboarding UX mockups</title>
+<style>
+  body{font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;color:#1d2b33;max-width:820px;margin:28px auto;padding:0 18px;background:#f6f8f9}
+  h1{font-size:23px;margin:0 0 4px}p.sub{color:#5b6b73;margin:0 0 18px}
+  .frames{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .frame{background:#fff;border:1px solid #dde4e8;border-radius:12px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+  .frame h2{font-size:13px;margin:0 0 8px;color:#245c73}
+  .bar{height:8px;border-radius:4px;background:#dde4e8;margin:6px 0}.bar.w60{width:60%}.bar.w80{width:80%}
+  .btn{display:inline-block;margin-top:10px;padding:4px 12px;border-radius:6px;background:#245c73;color:#fff;font-size:12px}
+  .step{display:flex;gap:6px;margin:8px 0}.dot{width:10px;height:10px;border-radius:50%;background:#245c73}.dot.off{background:#c7d3d9}
+</style>
+</head>
+<body>
+<h1>Onboarding UX mockups</h1>
+<p class="sub">Three-step setup replacing the empty dashboard (from the October customer interviews).</p>
+<div class="frames">
+  <div class="frame"><h2>1 · Connect</h2><div class="step"><span class="dot"></span><span class="dot off"></span><span class="dot off"></span></div>
+    <div class="bar w80"></div><div class="bar w60"></div><span class="btn">Connect your store</span></div>
+  <div class="frame"><h2>2 · Invite</h2><div class="step"><span class="dot"></span><span class="dot"></span><span class="dot off"></span></div>
+    <div class="bar"></div><div class="bar w60"></div><span class="btn">Invite teammates</span></div>
+  <div class="frame"><h2>3 · First order</h2><div class="step"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div class="bar w80"></div><div class="bar"></div><span class="btn">Create a test order</span></div>
+</div>
+<p>Usability test plan: five sessions with new Team customers; success = first order within 10 minutes without help.</p>
+</body>
+</html>

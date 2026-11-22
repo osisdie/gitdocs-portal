@@ -1,0 +1,41 @@
+<!--
+  Northwind Labs (fictional) — Q4 operations review. Demo content for gitdocs-portal.
+-->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Q4 operations review</title>
+<style>
+  :root{--ink:#1d2b33;--muted:#5b6b73;--line:#dde4e8;--accent:#245c73;--good:#1f7a4d;--warn:#b5651d}
+  body{font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);max-width:760px;margin:28px auto;padding:0 18px}
+  h1{font-size:24px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
+  .kpi{border:1px solid var(--line);border-radius:10px;padding:10px 12px}.kpi b{display:block;font-size:22px}
+  .kpi .up{color:var(--good)}.kpi .down{color:var(--warn)}
+  table{border-collapse:collapse;width:100%;margin:8px 0 18px}td,th{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left}
+  th{color:var(--muted);font-weight:600;width:34%}
+  h2{font-size:17px;margin:22px 0 6px;color:var(--accent)}
+</style>
+</head>
+<body>
+<h1>Q4 operations review</h1>
+<p class="sub">Northwind Labs · platform and ops · November 2026</p>
+<div class="kpis">
+  <div class="kpi">Availability<b class="up">99.96%</b>target 99.9%</div>
+  <div class="kpi">p99 checkout latency<b class="up">310 ms</b>was 840 ms</div>
+  <div class="kpi">Infra cost<b class="down">−12%</b>vs. Q3 budget</div>
+</div>
+<h2>Highlights</h2>
+<p>The checkout latency incident drove a database connection pool fix and new observability dashboards. The Kubernetes
+upgrade finished without downtime. Infra cost went down after moving the staging database to a smaller plan;
+on-call load dropped to 3 pages per week.</p>
+<h2>Status page access</h2>
+<table>
+  <tr><th>Console</th><td>status.example.com/admin</td></tr>
+  <tr><th>User</th><td>ops-bot</td></tr>
+  <tr><th>API token</th><td>{{vault:ops/status-page-token}}</td></tr>
+</table>
+<h2>Next quarter</h2>
+<p>Finish the OAuth 2.1 migration, roll out API rate limits per tenant, and run a failover drill for the orders database.</p>
+</body>
+</html>

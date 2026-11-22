@@ -11,28 +11,52 @@
     "ct": "vv/6yzRs/g0iBdRiXpmnpcQxFEnOGirJtm9q8to9R9k="
   },
   "secrets": {
-    "demo/api-token": {
-      "iv": "vg0kZGndxfSuCz2s",
-      "ct": "sDAOUd80dOEZ7/jMgqUQ9dkxnOQT1X35nsqmBqLcWqH7IttEUSmaxvA=",
-      "note": "demo staging token",
+    "handbook/vpn-shared-key": {
+      "iv": "RIJ3+ec6SMj1iaxa",
+      "ct": "7wPy3n4To1uvMExerK2/4HIaTvs+gJLLyjWNcsBKIzxsK57xnlCBk/zT",
+      "note": "office VPN pre-shared key (fake)",
       "updated": "2026-11-22"
     },
-    "demo/db-password": {
-      "iv": "ezW+WJ7plKrm71EH",
-      "ct": "GKA2s2BITlu8A5gL02c8Y86J2TKpV5pljqmLcy0Lk9JSjsyCqio=",
-      "note": "demo staging db",
+    "ops/db-admin-password": {
+      "iv": "0zPbdgxvd6ALrdcI",
+      "ct": "26ZFafFeKqEQnr1/t79ymSzn3ubwgQnOsx+GLQAmmoAepTDb8wx5pDiJ0NyA0Q==",
+      "note": "orders database admin password (fake)",
       "updated": "2026-11-22"
     },
-    "postman/demo-service/api_token": {
-      "iv": "9JUvD3J3DYGPCSYE",
-      "ct": "cBvpJb8EPYyUw8N82FoUQrtfB1CQ8q50p38petw/ie9t0w==",
-      "note": "postman demo",
+    "ops/oncall-webhook-token": {
+      "iv": "o50207KoXDzzufhj",
+      "ct": "Htg05L6DAQ5hD6etMRcn88/vX97FmpqWY/gddYwaQIERx6l4Zt/pJeRwztfm",
+      "note": "alert router webhook token (fake)",
       "updated": "2026-11-22"
     },
-    "postman/demo-service/client_secret": {
-      "iv": "LF3wzGh5z7V1T01w",
-      "ct": "+iUGh7A5bId37cr1Hz6y5syw6EbKIUsFIhXoH9lAvHjZo+ZlefoKHV44",
-      "note": "postman demo",
+    "ops/status-page-token": {
+      "iv": "eU1qTLcK3HUeS4ml",
+      "ct": "a9574UX71TWB9y1UTFrb9OOumPTpOB44obE9AfApKD1E+wo1SJM/s+/JBUw=",
+      "note": "status page API token (fake)",
+      "updated": "2026-11-22"
+    },
+    "platform/registry-token": {
+      "iv": "AlNpxRsOPs2Ki4Da",
+      "ct": "eAQQn7Y5KF7jNAZtEXHindLKvXe+robS2eB7FU3NTSxK/MyygwpLp4tKs62rxp4=",
+      "note": "container registry deploy token (fake)",
+      "updated": "2026-11-22"
+    },
+    "platform/tracing-ingest-key": {
+      "iv": "GNCMNCGBlKchtB06",
+      "ct": "qxUeiritPD1Jf4CPV53tOZe55iM+nE6w2lzHbxjwFE5LF9Dv+4kT0cyWI6ft",
+      "note": "tracing trial ingest key (fake)",
+      "updated": "2026-11-22"
+    },
+    "postman/orders/api_key": {
+      "iv": "bSctOLk0h/moKaYs",
+      "ct": "udpB3HExKi+sVRRlVDyQstGlBPOUPmfxX3AJ0XBoiDgipkTguG7IFhCxx0rKxEOxfQ==",
+      "note": "Orders API key, staging (fake)",
+      "updated": "2026-11-22"
+    },
+    "postman/orders/client_secret": {
+      "iv": "WcSerUUrfjJ5QQ9H",
+      "ct": "57pmTw65bUJ11+KNjAiGwhSbM31a3qMnVQ45Jnrsp2h0qrA4AywhsYrJ5gu0x7MqZA==",
+      "note": "Orders OAuth client secret, staging (fake)",
       "updated": "2026-11-22"
     }
   }

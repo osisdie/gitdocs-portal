@@ -1,8 +1,14 @@
 {
   "site": {
-    "title": "gitdocs demo",
+    "title": "Northwind Docs",
     "projectRoot": "",
-    "readmeIndex": ""
+    "readmeIndex": "",
+    "people": {
+      "alice@example.com": "Alice Chen",
+      "bob@example.com": "Bob Novak",
+      "chen@example.com": "Chen Wei",
+      "dana@example.com": "Dana Ortiz"
+    }
   },
   "categories": [
     "計畫",
@@ -32,119 +38,687 @@
     "極機密"
   ],
   "projects": {
-    "api": {
-      "title": "api",
+    "（索引）": {
+      "title": "（索引）",
       "desc": ""
     },
     "handbook": {
       "title": "handbook",
-      "desc": ""
+      "desc": "How we work: onboarding, security and policies."
     },
-    "reports": {
-      "title": "reports",
-      "desc": ""
+    "handbook/onboarding": {
+      "title": "onboarding",
+      "desc": "Everything a new hire needs in the first weeks.",
+      "parent": "handbook"
+    },
+    "handbook/security": {
+      "title": "security",
+      "desc": "Access, SSO and incident response policies.",
+      "parent": "handbook"
+    },
+    "ops": {
+      "title": "ops",
+      "desc": "Runbooks, postmortems and on-call.",
+      "visibility": "public"
+    },
+    "ops/postmortems": {
+      "title": "postmortems",
+      "desc": "Blameless reviews of past incidents.",
+      "parent": "ops"
+    },
+    "ops/runbooks": {
+      "title": "runbooks",
+      "desc": "Step-by-step procedures for on-call.",
+      "parent": "ops"
+    },
+    "platform": {
+      "title": "platform",
+      "desc": "Infrastructure and the public Orders API."
+    },
+    "platform/api": {
+      "title": "api",
+      "desc": "Orders API: Postman files, rate limits, OAuth.",
+      "parent": "platform"
+    },
+    "platform/infra": {
+      "title": "infra",
+      "desc": "Kubernetes, observability and deploy tooling.",
+      "parent": "platform"
+    },
+    "product": {
+      "title": "product",
+      "desc": "Roadmap and customer research."
+    },
+    "product/research": {
+      "title": "research",
+      "desc": "Interviews, comparisons and UX work.",
+      "parent": "product"
+    },
+    "product/roadmap": {
+      "title": "roadmap",
+      "desc": "What we build next and why.",
+      "parent": "product"
     }
   },
   "filters": [
     {
-      "name": "最近 30 天",
+      "name": "Last 30 days",
       "query": "after:-30d"
     },
     {
-      "name": "已發布",
+      "name": "Published",
       "query": "s:已發布"
     },
     {
-      "name": "機密以上",
+      "name": "Confidential+",
       "query": "sens>=機密"
     },
     {
-      "name": "計畫",
+      "name": "Plans",
       "query": "cat:計畫"
+    },
+    {
+      "name": "Open incidents",
+      "query": "k:Incident -s:封存 -s:已發布"
     }
   ],
   "keywords": {
     "API": [
-      "\bapi\b",
+      "\\bapis?\\b",
       "postman",
       "openapi",
-      "swagger"
+      "endpoints?"
     ],
-    "CI": [
-      "\bci\b",
-      "github actions",
-      "gitlab ci"
+    "Kubernetes": [
+      "kubernetes",
+      "kubectl",
+      "\\bhelm\\b",
+      "node pools?"
     ],
-    "測試": [
-      "測試",
-      "\btests?\b",
-      "\bcoverage\b"
+    "SSO / OAuth": [
+      "\\bsso\\b",
+      "oauth",
+      "\\bsaml\\b",
+      "identity provider"
     ],
-    "成本": [
-      "成本",
-      "\bcosts?\b",
-      "\bpricing\b"
+    "Security": [
+      "\\bsecurity\\b",
+      "\\bmfa\\b",
+      "vulnerab"
     ],
-    "登入／OAuth": [
-      "\boauth\b",
-      "登入",
-      "\bsso\b"
+    "Incident": [
+      "\\bincidents?\\b",
+      "postmortem",
+      "outage",
+      "\\bsev[123]\\b"
+    ],
+    "On-call": [
+      "on-call",
+      "\\bpag(?:ed|er|ing)\\b",
+      "escalat"
+    ],
+    "Observability": [
+      "observability",
+      "tracing",
+      "dashboards?",
+      "\\balerts?\\b"
+    ],
+    "Database": [
+      "\\bdatabase\\b",
+      "replica",
+      "failover",
+      "connection pool"
+    ],
+    "Latency": [
+      "latency",
+      "\\bp99\\b",
+      "load test"
+    ],
+    "Cost": [
+      "\\bcosts?\\b",
+      "pricing",
+      "budget",
+      "\\bbill(?:ing)?\\b"
+    ],
+    "Onboarding": [
+      "onboarding",
+      "new hires?",
+      "first week"
     ],
     "UX": [
-      "\bux\b",
-      "\bmockups?\b"
+      "\\bux\\b",
+      "mockups?",
+      "usability"
     ],
-    "GDPR／隱私": [
-      "\bgdpr\b",
-      "隱私",
-      "個資"
+    "Customer research": [
+      "customer interviews?",
+      "\\bpersonas?\\b",
+      "\\binterviews?\\b"
     ],
-    "Prompt": [
-      "\bprompts?\b"
+    "Roadmap": [
+      "roadmap",
+      "milestones?"
+    ],
+    "Testing": [
+      "\\btests?\\b",
+      "\\bcoverage\\b",
+      "end-to-end"
+    ],
+    "CI/CD": [
+      "\\bci\\b",
+      "pipeline",
+      "\\bdeploy(?:s|ed|ment)?\\b",
+      "rollout"
+    ],
+    "Privacy": [
+      "\\bgdpr\\b",
+      "privacy",
+      "personal data"
+    ],
+    "Rate limits": [
+      "rate limits?",
+      "throttl",
+      "quotas?"
+    ],
+    "TLS": [
+      "\\btls\\b",
+      "certificates?"
+    ],
+    "Search": [
+      "\\bsearch\\b",
+      "full-text"
     ]
   },
   "docs": {
-    "docs/handbook/2026-11-01-getting-started.md": {
+    "docs/README.md": {
       "id": 1,
-      "title": "Getting started",
-      "project": "handbook",
+      "title": "Welcome to Northwind Docs",
+      "project": "（索引）",
       "subproject": "",
-      "category": "報告",
-      "status": "已確認",
-      "sensitivity": "內部",
-      "date": "2026-11-01",
+      "category": "索引",
+      "status": "已發布",
+      "sensitivity": "公開",
+      "date": "2026-08-25",
       "url": "",
-      "desc": "How the demo content is laid out, and how vault fields work.",
-      "tags": [],
-      "related": []
+      "desc": "Map of projects, conventions and how the vault works.",
+      "tags": [
+        "start-here"
+      ],
+      "related": [],
+      "reporter": "alice@example.com",
+      "sensitivityReviewed": true
     },
-    "docs/reports/2026-11-15-quarterly-ops-review.html": {
+    "docs/handbook/onboarding/2026-08-26-first-week.md": {
       "id": 2,
-      "title": "Quarterly ops review",
-      "project": "reports",
-      "subproject": "",
+      "title": "Your first week at Northwind",
+      "project": "handbook",
+      "subproject": "onboarding",
+      "category": "報告",
+      "status": "已發布",
+      "sensitivity": "公開",
+      "date": "2026-08-26",
+      "url": "",
+      "desc": "What a new hire at Northwind Labs does in the first five days.",
+      "tags": [
+        "new-hire"
+      ],
+      "related": [],
+      "reporter": "dana@example.com",
+      "reviewer": "alice@example.com",
+      "sensitivityReviewed": true
+    },
+    "docs/handbook/security/2026-08-28-access-policy-v1.md": {
+      "id": 3,
+      "title": "Access policy (v1)",
+      "project": "handbook",
+      "subproject": "security",
+      "category": "報告",
+      "status": "封存",
+      "sensitivity": "內部",
+      "date": "2026-08-28",
+      "url": "",
+      "desc": "First version of the access policy — replaced by the SSO-based policy in September.",
+      "tags": [
+        "policy"
+      ],
+      "related": [],
+      "reporter": "chen@example.com"
+    },
+    "docs/handbook/onboarding/2026-09-02-dev-environment.md": {
+      "id": 4,
+      "title": "Developer environment setup",
+      "project": "handbook",
+      "subproject": "onboarding",
       "category": "報告",
       "status": "已確認",
       "sensitivity": "內部",
-      "date": "2026-11-15",
+      "date": "2026-09-02",
+      "url": "",
+      "desc": "Laptop, VPN, Kubernetes access and local tests for engineers.",
+      "tags": [
+        "new-hire",
+        "vpn"
+      ],
+      "related": [],
+      "reporter": "bob@example.com",
+      "reviewer": "chen@example.com"
+    },
+    "docs/platform/infra/2026-09-05-kubernetes-upgrade-plan.md": {
+      "id": 5,
+      "title": "Kubernetes upgrade plan",
+      "project": "platform",
+      "subproject": "infra",
+      "category": "計畫",
+      "status": "已確認",
+      "sensitivity": "內部",
+      "date": "2026-09-05",
+      "url": "",
+      "desc": "Upgrade plan for the staging and production Kubernetes clusters, node pool by node pool.",
+      "tags": [
+        "q3",
+        "upgrade"
+      ],
+      "related": [],
+      "reporter": "bob@example.com",
+      "assignee": "bob@example.com",
+      "reviewer": "alice@example.com"
+    },
+    "docs/platform/infra/deploy-staging.sh": {
+      "id": 6,
+      "title": "deploy-staging",
+      "project": "platform",
+      "subproject": "infra",
+      "category": "腳本",
+      "status": "已確認",
+      "sensitivity": "內部",
+      "date": "2026-09-08",
       "url": "",
       "desc": "",
-      "tags": [],
-      "related": []
+      "tags": [
+        "staging"
+      ],
+      "related": [
+        5
+      ],
+      "reporter": "bob@example.com",
+      "reviewer": "chen@example.com"
     },
-    "docs/api/demo-service.postman_environment.json": {
-      "id": 3,
-      "title": "Demo Service — staging",
-      "project": "api",
-      "subproject": "",
+    "docs/handbook/security/2026-09-10-access-policy.md": {
+      "id": 7,
+      "title": "Access and SSO policy",
+      "project": "handbook",
+      "subproject": "security",
+      "category": "報告",
+      "status": "已確認",
+      "sensitivity": "內部",
+      "date": "2026-09-10",
+      "url": "",
+      "desc": "SSO everywhere, enforced MFA, and reviewed production access.",
+      "tags": [
+        "policy"
+      ],
+      "related": [],
+      "reporter": "chen@example.com",
+      "reviewer": "alice@example.com",
+      "supersedes": 3
+    },
+    "docs/product/roadmap/2026-09-15-roadmap-2027.html": {
+      "id": 8,
+      "title": "Product roadmap 2027",
+      "project": "product",
+      "subproject": "roadmap",
+      "category": "報告",
+      "status": "已發布",
+      "sensitivity": "公開",
+      "date": "2026-09-15",
+      "url": "https://www.example.com/northwind/roadmap-2027",
+      "desc": "",
+      "tags": [
+        "2027"
+      ],
+      "related": [],
+      "reporter": "alice@example.com",
+      "reviewer": "dana@example.com",
+      "sensitivityReviewed": true
+    },
+    "docs/ops/runbooks/2026-09-20-database-failover.md": {
+      "id": 9,
+      "title": "Database failover runbook",
+      "project": "ops",
+      "subproject": "runbooks",
+      "category": "技能手冊",
+      "status": "待確認",
+      "sensitivity": "內部",
+      "date": "2026-09-20",
+      "url": "",
+      "desc": "Promote the orders database replica when the primary is down.",
+      "tags": [
+        "runbook",
+        "orders"
+      ],
+      "related": [],
+      "reporter": "dana@example.com",
+      "assignee": "bob@example.com",
+      "reviewer": "alice@example.com"
+    },
+    "docs/platform/api/northwind-orders-staging.postman_environment.json": {
+      "id": 10,
+      "title": "Northwind Orders — staging",
+      "project": "platform",
+      "subproject": "api",
       "category": "API",
       "status": "已確認",
       "sensitivity": "內部",
-      "date": "2026-11-22",
+      "date": "2026-09-24",
       "url": "",
       "desc": "",
-      "tags": [],
-      "related": []
+      "tags": [
+        "orders",
+        "staging"
+      ],
+      "related": [],
+      "reporter": "bob@example.com",
+      "reviewer": "chen@example.com"
+    },
+    "docs/platform/api/northwind-orders.postman_collection.json": {
+      "id": 11,
+      "title": "Northwind Orders API",
+      "project": "platform",
+      "subproject": "api",
+      "category": "API",
+      "status": "已確認",
+      "sensitivity": "內部",
+      "date": "2026-09-24",
+      "url": "",
+      "desc": "",
+      "tags": [
+        "orders"
+      ],
+      "related": [],
+      "reporter": "bob@example.com",
+      "reviewer": "chen@example.com"
+    },
+    "docs/platform/infra/2026-10-02-observability-evaluation.html": {
+      "id": 12,
+      "title": "Observability stack evaluation",
+      "project": "platform",
+      "subproject": "infra",
+      "category": "評估",
+      "status": "待確認",
+      "sensitivity": "內部",
+      "date": "2026-10-02",
+      "url": "",
+      "desc": "",
+      "tags": [
+        "vendor-eval"
+      ],
+      "related": [],
+      "reporter": "bob@example.com",
+      "reviewer": "chen@example.com"
+    },
+    "docs/product/research/2026-10-08-customer-interviews.md": {
+      "id": 13,
+      "title": "Customer interviews — October",
+      "project": "product",
+      "subproject": "research",
+      "category": "評估",
+      "status": "已確認",
+      "sensitivity": "內部",
+      "date": "2026-10-08",
+      "url": "",
+      "desc": "Findings from twelve customer interviews about onboarding, search and pricing.",
+      "tags": [
+        "interviews"
+      ],
+      "related": [],
+      "reporter": "dana@example.com",
+      "reviewer": "alice@example.com"
+    },
+    "docs/ops/postmortems/2026-10-11-checkout-latency-postmortem.html": {
+      "id": 14,
+      "title": "Postmortem: checkout latency",
+      "project": "ops",
+      "subproject": "postmortems",
+      "category": "報告",
+      "status": "已發布",
+      "sensitivity": "內部",
+      "date": "2026-10-11",
+      "url": "",
+      "desc": "",
+      "tags": [
+        "postmortem",
+        "orders"
+      ],
+      "related": [
+        12,
+        9
+      ],
+      "reporter": "dana@example.com",
+      "reviewer": "bob@example.com"
+    },
+    "docs/handbook/security/2026-10-14-incident-response.md": {
+      "id": 15,
+      "title": "Security incident response",
+      "project": "handbook",
+      "subproject": "security",
+      "category": "技能手冊",
+      "status": "待確認",
+      "sensitivity": "內部",
+      "date": "2026-10-14",
+      "url": "",
+      "desc": "Severity levels, roles and the first 30 minutes of a security incident.",
+      "tags": [
+        "policy"
+      ],
+      "related": [
+        19
+      ],
+      "reporter": "chen@example.com",
+      "reviewer": "alice@example.com"
+    },
+    "docs/platform/api/2026-10-20-api-rate-limits.md": {
+      "id": 16,
+      "title": "API rate limits",
+      "project": "platform",
+      "subproject": "api",
+      "category": "報告",
+      "status": "待處理",
+      "sensitivity": "內部",
+      "date": "2026-10-20",
+      "url": "",
+      "desc": "Per-tenant rate limits and quotas for the public Orders API.",
+      "tags": [
+        "orders",
+        "proposal"
+      ],
+      "related": [
+        11
+      ],
+      "reporter": "bob@example.com",
+      "assignee": "alice@example.com",
+      "reviewer": "chen@example.com"
+    },
+    "docs/product/research/2026-10-27-search-tools-comparison.md": {
+      "id": 17,
+      "title": "Order search: options compared",
+      "project": "product",
+      "subproject": "research",
+      "category": "比較",
+      "status": "待確認",
+      "sensitivity": "內部",
+      "date": "2026-10-27",
+      "url": "",
+      "desc": "Three ways to add order search — database full-text, a search engine, or a hosted service.",
+      "tags": [
+        "proposal"
+      ],
+      "related": [
+        13
+      ],
+      "reporter": "dana@example.com",
+      "reviewer": "alice@example.com"
+    },
+    "docs/ops/runbooks/rotate-certificates.sh": {
+      "id": 18,
+      "title": "rotate-certificates",
+      "project": "ops",
+      "subproject": "runbooks",
+      "category": "腳本",
+      "status": "待處理",
+      "sensitivity": "內部",
+      "date": "2026-10-30",
+      "url": "",
+      "desc": "",
+      "tags": [
+        "monthly"
+      ],
+      "related": [],
+      "reporter": "chen@example.com"
+    },
+    "docs/ops/runbooks/2026-11-02-on-call-handbook.md": {
+      "id": 19,
+      "title": "On-call handbook",
+      "project": "ops",
+      "subproject": "runbooks",
+      "category": "技能手冊",
+      "status": "已發布",
+      "sensitivity": "內部",
+      "date": "2026-11-02",
+      "url": "",
+      "desc": "How the on-call rotation works — paging, escalation, handover and postmortems.",
+      "tags": [
+        "runbook"
+      ],
+      "related": [],
+      "reporter": "dana@example.com",
+      "reviewer": "bob@example.com"
+    },
+    "docs/platform/api/2026-11-05-oauth-migration-plan.md": {
+      "id": 20,
+      "title": "OAuth 2.1 migration plan",
+      "project": "platform",
+      "subproject": "api",
+      "category": "計畫",
+      "status": "待處理",
+      "sensitivity": "內部",
+      "date": "2026-11-05",
+      "url": "",
+      "desc": "Move API clients from static API keys to OAuth 2.1 client credentials.",
+      "tags": [
+        "q1",
+        "migration"
+      ],
+      "related": [
+        7,
+        16
+      ],
+      "reporter": "alice@example.com",
+      "assignee": "alice@example.com",
+      "reviewer": "bob@example.com"
+    },
+    "docs/ops/2026-11-09-vendor-escalation-contacts.md": {
+      "id": 21,
+      "title": "Vendor escalation contacts",
+      "project": "ops",
+      "subproject": "",
+      "category": "報告",
+      "status": "已確認",
+      "sensitivity": "機密",
+      "date": "2026-11-09",
+      "url": "",
+      "desc": "Who to call at our hosting and payments vendors during a SEV1 incident. Contains personal contact data.",
+      "tags": [
+        "contacts"
+      ],
+      "related": [],
+      "reporter": "dana@example.com",
+      "reviewer": "chen@example.com"
+    },
+    "docs/product/roadmap/2026-11-12-pricing-experiment-plan.md": {
+      "id": 22,
+      "title": "Pricing experiment plan",
+      "project": "product",
+      "subproject": "roadmap",
+      "category": "計畫",
+      "status": "待處理",
+      "sensitivity": "內部",
+      "date": "2026-11-12",
+      "url": "",
+      "desc": "A/B test of usage-based pricing for the Team plan, with API quotas as the metered unit.",
+      "tags": [
+        "experiment"
+      ],
+      "related": [
+        16
+      ],
+      "reporter": "alice@example.com"
+    },
+    "docs/ops/postmortems/2026-11-16-sso-outage-postmortem.md": {
+      "id": 23,
+      "title": "Postmortem (draft): SSO outage",
+      "project": "ops",
+      "subproject": "postmortems",
+      "category": "報告",
+      "status": "待處理",
+      "sensitivity": "內部",
+      "date": "2026-11-16",
+      "url": "",
+      "desc": "Draft postmortem — SSO logins failed for 25 minutes after a certificate rotation.",
+      "tags": [
+        "postmortem",
+        "draft"
+      ],
+      "related": [
+        18,
+        7
+      ],
+      "reporter": "chen@example.com",
+      "assignee": "chen@example.com",
+      "reviewer": "alice@example.com"
+    },
+    "docs/product/research/2026-11-18-onboarding-ux-mockups.html": {
+      "id": 24,
+      "title": "Onboarding UX mockups",
+      "project": "product",
+      "subproject": "research",
+      "category": "設計／UX",
+      "status": "待處理",
+      "sensitivity": "內部",
+      "date": "2026-11-18",
+      "url": "",
+      "desc": "",
+      "tags": [
+        "q1"
+      ],
+      "related": [
+        13,
+        2
+      ],
+      "reporter": "dana@example.com",
+      "assignee": "alice@example.com",
+      "reviewer": "dana@example.com"
+    },
+    "docs/2026-11-20-q4-ops-review.html": {
+      "id": 25,
+      "title": "Q4 operations review",
+      "project": "（索引）",
+      "subproject": "",
+      "category": "報告",
+      "status": "待確認",
+      "sensitivity": "內部",
+      "date": "2026-11-20",
+      "url": "",
+      "desc": "",
+      "tags": [
+        "q4",
+        "review"
+      ],
+      "related": [
+        14,
+        5
+      ],
+      "reporter": "bob@example.com",
+      "reviewer": "alice@example.com"
     }
   }
 }

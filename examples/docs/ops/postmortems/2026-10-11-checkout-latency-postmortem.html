@@ -1,0 +1,37 @@
+<!--
+  Northwind Labs (fictional) — postmortem: checkout latency incident. Demo content for gitdocs-portal.
+-->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postmortem: checkout latency</title>
+<style>
+  body{font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:#1d2b33;max-width:760px;margin:28px auto;padding:0 18px}
+  h1{font-size:23px;margin:0 0 4px}.meta{color:#5b6b73;margin:0 0 16px}
+  .sev{display:inline-block;padding:1px 9px;border-radius:999px;background:#b5651d;color:#fff;font-size:12px;font-weight:600}
+  ol.tl{border-left:3px solid #dde4e8;padding-left:18px;list-style:none}ol.tl li{margin:0 0 8px}ol.tl b{display:inline-block;width:56px;color:#245c73}
+  h2{font-size:17px;margin:20px 0 6px}
+</style>
+</head>
+<body>
+<h1>Postmortem: checkout latency</h1>
+<p class="meta"><span class="sev">SEV2</span> · 2026-10-09 · 47 minutes · blameless</p>
+<h2>Summary</h2>
+<p>Checkout p99 latency rose from 300 ms to 4 s after a deploy doubled the number of orders pods; the database
+connection pool ran out. The incident ended with a rollback; no orders were lost.</p>
+<h2>Timeline</h2>
+<ol class="tl">
+  <li><b>14:02</b> Deploy of orders v1.42 (pods 12 → 24)</li>
+  <li><b>14:09</b> On-call paged: checkout latency alert</li>
+  <li><b>14:20</b> Tracing shows waits on database connections</li>
+  <li><b>14:38</b> Rollback; latency recovers</li>
+  <li><b>14:49</b> Incident closed</li>
+</ol>
+<h2>Action items</h2>
+<ul>
+  <li>Size the connection pool per pod from the database limit (platform)</li>
+  <li>Add a saturation panel to the observability dashboards (platform)</li>
+  <li>Load test before scaling changes (ops)</li>
+</ul>
+</body>
+</html>

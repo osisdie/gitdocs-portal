@@ -1,0 +1,22 @@
+{
+	"info": {
+		"_postman_id": "8a1d0c2e-0000-4000-8000-0000000000a1",
+		"name": "Northwind Orders API",
+		"description": "Orders API v1 — list, create and cancel orders. Rate limits apply per tenant.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "apikey",
+		"apikey": [
+			{ "key": "key", "value": "X-Api-Key", "type": "string" },
+			{ "key": "value", "value": "{{vault:postman/orders/api_key}}", "type": "string" }
+		]
+	},
+	"item": [
+		{ "name": "List orders", "request": { "method": "GET", "url": "{{base_url}}/v1/orders?limit=20" } },
+		{ "name": "Create order", "request": { "method": "POST", "url": "{{base_url}}/v1/orders",
+			"body": { "mode": "raw", "raw": "{ \"sku\": \"NW-1042\", \"qty\": 2 }" } } },
+		{ "name": "Cancel order", "request": { "method": "POST", "url": "{{base_url}}/v1/orders/{{order_id}}/cancel" } },
+		{ "name": "Health", "request": { "method": "GET", "url": "{{base_url}}/v1/health" } }
+	]
+}
