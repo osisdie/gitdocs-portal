@@ -6,6 +6,7 @@ MantisBT 風格的文件入口，**git 就是資料庫**。把 HTML／Markdown�
 
 ## 目錄
 
+- [畫面截圖](#畫面截圖)
 - [核心程式與內容 repo 分開](#核心程式與內容-repo-分開)
 - [Vault：憑證遮罩](#vault憑證遮罩)
 - [結構](#結構)
@@ -16,7 +17,50 @@ MantisBT 風格的文件入口，**git 就是資料庫**。把 HTML／Markdown�
 - [搜尋語法](#搜尋語法)
 - [locked：README 索引與手動修改](#lockedreadme-索引與手動修改)
 - [入口畫面](#入口畫面)
+- [介面語言](#介面語言)
 - [Server mode（多人模式）](#server-mode多人模式)
+  - [公開專案](#公開專案)
+  - [機密文件](#機密文件)
+- [外部內容來源](#外部內容來源)
+- [貢獻](#貢獻)
+
+## 畫面截圖
+
+**首頁：一眼看出哪些事在等你**
+
+![首頁](assets/screenshots/01-home.png)
+
+**搜尋與篩選：全文檢索、查詢語法、關鍵字標籤**
+
+![搜尋與篩選](assets/screenshots/02-list.png)
+
+**文件頁：內容優先，中繼資料與工作流程放在旁邊**
+
+![文件頁](assets/screenshots/03-doc.png)
+
+**Vault 顯示：檢查權限、由伺服器解密、每次存取都留紀錄**
+
+![Vault 顯示](assets/screenshots/04-vault-reveal.png)
+
+**專案 Vault：管理者可新增、替換、顯示各專案的密鑰**
+
+![專案 Vault](assets/screenshots/05-project-vault.png)
+
+**關聯圖：文件、專案與共同關鍵字**
+
+![關聯圖](assets/screenshots/08-graph.png)
+
+**管理：各專案角色與邀請**
+
+![管理：使用者](assets/screenshots/09-admin-users.png)
+
+**手機版：文件頁，內容優先**
+
+![手機版文件頁](assets/screenshots/14-mobile-doc.png)
+
+全部 15 張截圖（摘要、時間軸、深色主題、個人選單、專案管理、繁體中文介面…）：[assets/screenshots/](assets/screenshots/README.zh-TW.md)。
+以 `npm run screenshots` 重新產生：`examples/` 的示範內容、模擬的伺服器模式 API、以固定版本 `playwright-core` 驅動的
+headless Chromium，不會啟動任何伺服器；加 `-- --plain` 產生不含標示的版本。
 
 ## 核心程式與內容 repo 分開
 
@@ -159,6 +203,10 @@ npm run doc -- filter add '本週' 'after:-7d'
 
 入口的搜尋框可以和下拉選單、關鍵字篩選一起用，全部條件都要成立。搜尋框旁的 `?` 有同樣的說明。
 
+狀態、機敏性、分類也可以用英文寫（代稱或英文標籤）：`s:open|in-review|confirmed|published|archived`、
+`sens:public|internal|confidential|secret`、`sens>=confidential`、`cat:plan|evaluation|comparison|audit|design-ux|form|api|playbook|script-copy|shell-script|index|report`。
+`s:published sens>=confidential` 和 `s:已發布 sens>=機密` 找到的文件完全相同。
+
 ## locked：README 索引與手動修改
 
 - 設了 `site.readmeIndex` 時，以那份索引為準：每次 build 都會用 README 的標題、說明、原始網址、日期覆蓋 `catalog.json`。
@@ -174,6 +222,15 @@ npm run doc -- filter add '本週' 'after:-7d'
 - **時間軸**：依月份排列。
 - **專案頁** `#/project/<名稱>`：專案說明、子專案、各項統計、最近文件。
 - **文件頁** `#/doc/<編號>`：metadata、機敏警示、vault 欄位清單、關聯／被取代／相似文件、git 歷史、預覽（Markdown 會轉成網頁顯示，`{{vault:…}}` 顯示成遮罩）。
+
+## 介面語言
+
+入口介面預設是**英文**，內建**繁體中文**（zh-TW）。
+
+- **切換**：右上角個人選單 →「語言」。畫面直接重繪，不重新載入。選擇會記住（多人模式存在 `prefs.lang`；靜態模式存在 `localStorage` 的 `gitdocs:lang`）。
+- **用網址指定**：網址加 `?lang=zh-TW`（或 `?lang=en`），例如 `https://docs.example.com/?lang=zh-TW#/list`。只在使用者沒有在選單選過語言時生效，也不會被記住；適合截圖和分享連結。
+- **資料不變**：狀態、機敏性、預設分類、索引專案在 `catalog.json` 和 D1 裡仍然存中文（`待處理`、`機密`、`評估`、`（索引）`…），介面只是透過對照表**顯示**成各語言（英文：Open、Confidential、Evaluation、(Index)…）。自訂的值照原樣顯示。
+- **新增語言**：複製 `site/i18n/en.js` 成 `site/i18n/<語言代碼>.js`，翻譯每個值（key 和 `{參數}` 不動；複數字串是 `{ one, other }` 物件，由 `Intl.PluralRules` 挑選）。再到 `site/i18n.js` import 它、加進 `CATALOGS` 和 `LANGS`，並讓 `normLang()` 認得這個代碼；把檔案加進 `functions/_lib/gate.js` 的 `SHELL_FILES`（伺服器的允許清單；和 `site/` 不一致時測試會失敗）。儲存值的標籤是 `status.*`、`sens.*`、`cat.*`、`project.*` 這幾組 key。`site/vault-frame.js`（內嵌在沙箱 HTML 文件裡）自己帶少量字串，依文件本身的 `<html lang>` 決定語言。
 
 ## Server mode（多人模式）
 
@@ -225,6 +282,20 @@ npm run doc -- filter add '本週' 'after:-7d'
 6. **本機開發**：執行 `npx --yes wrangler@4.166.0 pages dev dist --ip 127.0.0.1`（只綁 127.0.0.1，不要用 `0.0.0.0`），
    `DEV_USER_EMAIL` 放在 `.dev.vars`。
 
+### 公開專案
+
+類似 MantisBT 的「檢視狀態：公開」：`npm run doc -- project <名稱> visibility=public`（只限頂層專案；預設是
+`visibility=private`）讓**所有已開通的使用者**都能以 viewer 身分看這個專案：文件、搜尋結果、留言（可讀也可留）。
+改狀態／人員／標籤、顯示 vault 欄位、管理成員仍然需要該專案的成員資格。子專案跟著頂層專案；索引專案 `（索引）` 永遠不能公開。
+`GET /api/me` 會在 `publicProjects` 列出公開專案；build 出來的 `catalog.json` 每個 `projects` 項目都帶有實際生效的 `visibility`。
+static mode 不受影響。有開 Access group 同步時，只有至少有一個成員資格的使用者能通過 Access，所以另一個組織的人要給他們自己專案的成員資格（或另設 Access 規則）。
+
+### 機密文件
+
+server mode 下，`機密` 以上的文件只有該專案的 **editor 以上**看得到內容：viewer 與公開專案的訪客只看得到標題與欄位（`restricted: true`），
+`/docs/…` 回 403。文件也可以自己宣告最低機敏性：Markdown front matter 寫 `sensitivity: 機密`，或 HTML 寫
+`<meta name="sensitivity" content="機密">`（也接受 `public` / `internal` / `confidential` / `secret`）。宣告只會往上調，複核後也一樣有效；要調低就改檔案。
+
 ### 把狀態寫回 git
 
 網頁上的修改存在 D1。`npm run state:pull`（owner 在本機執行，透過 `wrangler d1 execute --remote`）會把有變動的
@@ -246,6 +317,41 @@ npm run doc -- filter add '本週' 'after:-7d'
   不會解密也不會留稽核紀錄。
 - `VAULT_KEY` 能解開 git 裡 `vault/vault.json` 的所有 secret，請和密語同等保管。
 - 分享用 build（`--max-sensitivity`）也會拿掉回報人／處理人／確認人的 email。`docs/notes/` 永遠不部署。
+
+## 外部內容來源
+
+第二個組織可以從**他們自己的 git repo** 把文件放進同一個入口（他們只推自己的 repo，碰不到你的內容 repo），在入口裡成為一個頂層專案。
+在 `docs/catalog.json` 宣告來源：
+
+```json
+"site": { "sources": [{ "name": "acme", "repo": "https://git.example.com/acme/docs.git", "ref": "main", "path": "docs" }] }
+```
+
+```bash
+npm run sources:pull     # 把每個來源抓到 .sources/<名稱>/（已列入 gitignore；內容 repo 也要在 .gitignore 加 ".sources/"）
+npm run build            # .sources/acme/docs/** 會掛在 docs/acme/** — 編號與欄位仍存在你的 catalog.json
+```
+
+- `name` 是專案代號（`[a-z0-9-]`，不能和本地資料夾同名）；`path` 是來源 repo 裡的資料夾（預設是 repo 根目錄）；`ref` 是分支／tag／commit。
+  子資料夾變成子專案；git 歷史與建立者取自來源 repo；紀錄會帶 `source: "acme"`。
+- **憑證**不要寫進 `catalog.json`：用 git 的 credential helper／SSH agent，或在 CI 設遮罩變數 `SOURCE_ACME_URL`
+  （例如在網址的 userinfo 帶唯讀的 GitLab deploy token：`https://deploy:<token>@…`）覆蓋 `repo`。這個網址不會寫進 `.sources/`，錯誤訊息裡也會遮掉；
+  帶 query string 或 fragment 的網址（`?private_token=…`）會被拒絕。
+- **來源 repo 能做與不能做的事**：只能決定檔案內容。symlink 與點開頭的檔案會跳過、掛載點跳不出自己的資料夾；欄位、公開設定、成員資格都在你的 repo 與 D1；
+  它的文件只能用 `acme/` 底下的 vault 名稱（secret 由你封存在你的 vault）：其他 `{{vault:…}}` 引用會被 build 擋掉，`/api/vault/reveal` 也會拒絕。
+  機敏性規則照樣適用（`極機密` 不上傳）；`npm run vault -- check`／`scan` 對掛載檔案只發警告，也絕不修改它們。
+- **沒有 checkout**（沒有憑證、抓取失敗）：build 會警告並且不部署這個來源的文件，但保留 catalog 裡的項目（編號、流程狀態），
+  直到成功抓取後確認檔案真的不在了才刪。`sources:pull` 失敗時會以 1 結束，CI 不會部署缺了來源的網站。
+- **它自己的 secret**（三個地方，依序查找，細節見 [DESIGN.md](DESIGN.md#tenant-vaults)）：
+  1. *網頁 vault*：`acme` 專案的 manager 在入口網站新增／更換／刪除 `acme/…` 的 secret（用 `VAULT_KEY` 加密存在 D1，有版本歷史；值不會出現在 log 或歷史裡）。
+  2. *來源 repo 自己的 vault*：租戶 clone gitdocs-portal 後執行 `CONTENT_DIR=../acme-docs node scripts/vault.mjs init` 與
+     `… set acme/smtp/password`，commit `acme-docs/vault/vault.json`（用他們自己的密語），再把 `node scripts/vault.mjs key`
+     的輸出透過安全管道交給你一次；你用 `npx --yes wrangler@4.166.0 pages secret put VAULT_KEY_ACME --project-name <project>` 存起來。
+     伺服器模式的 build（`wrangler.toml` 有 D1 binding，或加 `--server`）會把這個檔案（只留 `acme/…` 的名稱）部署到永遠不對外提供的位置；靜態 build 不會帶它。
+     網頁 vault 的 manager 不能覆蓋放在這裡或 host vault 的 secret（409）；owner 可以，而且會留下紀錄。
+  3. *你的 host vault*：你自己封存在 `acme/…` 底下的 secret。
+- **來源更新就重新部署**：CI 範本會先抓來源再 build；`templates/gitlab-ci.yml` 有來源 repo 要呼叫的 pipeline trigger 範例，
+  讓它們 push 後入口自動重新部署（GitHub 用 `repository_dispatch`）。細節見 [DESIGN.md](DESIGN.md#external-content-sources)。
 
 ## 貢獻
 

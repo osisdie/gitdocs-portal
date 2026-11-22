@@ -82,3 +82,57 @@ test('migration is idempotent', () => {
   syncOnce();
   assert.equal(fs.readFileSync(path.join(dir, 'docs/catalog.json'), 'utf8'), before);
 });
+
+test('keyword seeds use real \\b word boundaries; stored backspace aliases migrate on load (idempotent)', () => {
+  for (const aliases of Object.values(lib.DEFAULT_KEYWORDS)) for (const a of aliases) assert.equal(a.includes('\u0008'), false, a);
+  const [[, [api]]] = lib.compileKeywords({ API: lib.DEFAULT_KEYWORDS.API });
+  assert.equal('the api works'.match(api)?.length, 1);
+  assert.equal('rapid'.match(api), null);
+  const file = path.join(dir, 'docs/catalog.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.keywords = { API: ['\bapi\b', 'postman'], Mine: ['foo\\bar'] };
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const c = lib.loadCatalog();
+  assert.deepEqual(c.keywords, { API: ['\\bapi\\b', 'postman'], Mine: ['foo\\bar'] });
+  assert.deepEqual(lib.migrateKeywords(c.keywords), c.keywords, 'idempotent');
+  lib.saveCatalog(c);
+  assert.equal(fs.readFileSync(file, 'utf8').includes('\\u0008'), false);
+});
+
+test('HTML search text leaves out <head> / <title>', () => {
+  write('docs/beta/2026-11-07-page.html', '<!doctype html><html><head><title>Unique Page Title</title><meta name="x" content="metadata"></head><body><h1>Body heading</h1></body></html>');
+  const c = lib.loadCatalog();
+  const { items } = lib.syncCatalog(c);
+  const it = items.find((x) => x.rel === 'docs/beta/2026-11-07-page.html');
+  assert.equal(it.entry.title, 'Unique Page Title');
+  assert.equal(it.text, 'Body heading');
+  fs.rmSync(path.join(dir, 'docs/beta/2026-11-07-page.html'));
+});
+
+test('declared sensitivity (front matter / meta) raises, never lowers, and survives review', () => {
+  write('docs/beta/2026-11-08-declared.md', '---\nname: declared\nsensitivity: confidential\n---\n# Declared\n');
+  write('docs/beta/2026-11-09-meta.html', '<html><head><meta content="極機密" name="sensitivity"><title>Meta</title></head><body>x</body></html>');
+  write('docs/beta/2026-11-10-lower.md', '---\nsensitivity: public\n---\n# Lower\n\ncontact: someone.real@corp.example.org\n');
+  write('docs/beta/2026-11-11-bad.md', '---\nsensitivity: ultra\n---\n# Bad\n');
+  let c = lib.loadCatalog();
+  let r = lib.syncCatalog(c);
+  const e = (n) => c.docs[`docs/beta/${n}`];
+  assert.equal(e('2026-11-08-declared.md').sensitivity, '機密');
+  assert.equal(e('2026-11-09-meta.html').sensitivity, '極機密');
+  assert.equal(e('2026-11-10-lower.md').sensitivity, '機密', 'declared 公開 does not lower a detected 機密');
+  assert.equal(e('2026-11-11-bad.md').sensitivity, '內部');
+  assert.match(r.warnings.join('\n'), /2026-11-11-bad\.md: unknown declared sensitivity "ultra"/);
+  const rec = lib.toRecord(r.items.find((x) => x.rel === 'docs/beta/2026-11-08-declared.md'));
+  assert.equal(rec.declaredSensitivity, '機密');
+  // a reviewer lowers it in the catalog: the declaration in the file wins again on the next scan
+  Object.assign(e('2026-11-08-declared.md'), { sensitivity: '內部', sensitivityReviewed: true });
+  lib.saveCatalog(c);
+  c = lib.loadCatalog();
+  r = lib.syncCatalog(c);
+  assert.equal(c.docs['docs/beta/2026-11-08-declared.md'].sensitivity, '機密');
+  assert.match(r.raised.join('\n'), /declared\.md: 內部 → 機密 \(declared in the file\)/);
+  for (const n of ['2026-11-08-declared.md', '2026-11-09-meta.html', '2026-11-10-lower.md', '2026-11-11-bad.md']) fs.rmSync(path.join(dir, 'docs/beta', n));
+  c = lib.loadCatalog();
+  lib.syncCatalog(c);
+  lib.saveCatalog(c);
+});

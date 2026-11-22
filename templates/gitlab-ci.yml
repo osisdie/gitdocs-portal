@@ -3,6 +3,20 @@
 #  deploy — manual, default branch only; needs CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / CF_PAGES_PROJECT as masked CI variables.
 #           Server mode (wrangler.toml with a D1 binding): pending D1 migrations are applied first; the token then also
 #           needs Account → D1 → Edit.
+#  External sources (catalog.json → site.sources): both jobs run `node scripts/sources.mjs pull` first (a no-op when
+#           none are configured). Credentials: one masked CI variable per source, SOURCE_<NAME>_URL, e.g.
+#           SOURCE_ACME_URL = https://<deploy-token-user>:<deploy-token>@git.example.com/acme/docs.git
+#           (a GitLab deploy token of the source project with read_repository only). A failed pull fails the job, so a
+#           deploy never goes out without a source's documents.
+#           Redeploy when the source changes: create a pipeline trigger token here (Settings → CI/CD → Pipeline trigger
+#           tokens) and give it to the source project as a masked variable PORTAL_TRIGGER_TOKEN; its CI then calls
+#             trigger-portal:
+#               image: curlimages/curl:8.11.1
+#               rules: [{ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH' }]
+#               script:
+#                 - curl --fail -sS -X POST --form "token=$PORTAL_TRIGGER_TOKEN" --form ref=main
+#                     "https://git.example.com/api/v4/projects/<host-project-id>/trigger/pipeline"
+#           Triggered pipelines deploy without the manual step (rule below); everything else in this repo still needs it.
 image: node:22-alpine
 variables:
   GIT_DEPTH: 0            # full history: the portal shows per-file git history
@@ -14,15 +28,18 @@ check:
   stage: check
   script:
     - bash scripts/engine.sh check
+    - node scripts/sources.mjs pull
     - node scripts/build.mjs --check
     - node scripts/vault.mjs check
 
 deploy:
   stage: deploy
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "trigger" && $CLOUDFLARE_API_TOKEN'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CLOUDFLARE_API_TOKEN'
       when: manual
   script:
+    - node scripts/sources.mjs pull
     - node scripts/build.mjs
     - if [ -f wrangler.toml ] && grep -q '^\[\[d1_databases\]\]' wrangler.toml; then npx --yes wrangler@4.166.0 d1 migrations apply DB --remote; fi
     - npx --yes wrangler@4.166.0 pages deploy dist --project-name "$CF_PAGES_PROJECT" --branch main --commit-dirty=true

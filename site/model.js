@@ -1,6 +1,7 @@
 // Pure portal logic shared by the UI views (no DOM, no fetch), so it can be tested in Node.
 // Workflow statuses, legacy status mapping, roles, "pending for me" and the home-page sections.
 import { sensRank } from './query.js';
+import { t, joinList, label } from './i18n.js';
 
 export const WORKFLOW = ['待處理', '待確認', '已確認', '已發布', '封存'];
 // Catalogs built before the workflow change still carry these; syncCatalog migrates them on the next build.
@@ -21,6 +22,49 @@ export function statusList(catalogStatuses = [], docs = []) {
 // ---------- people ----------
 export const sameEmail = (a, b) => Boolean(a && b) && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 export const shortName = (email) => String(email || '').split('@')[0];
+
+// Display names (MantisBT "show realname"): a person is shown by name, never by email, except in the admin users
+// table and the signed-in user's own profile menu. Sources, later wins: catalog `site.people` { email: name }
+// (static mode) → server `/api/state` `people`, `author_name` / `actor_name` on rows, and `/api/me` `name`.
+// Without a name the email's local part is shown.
+export const NAME_MAX = 80;
+const PEOPLE = new Map();
+const normEmail = (e) => String(e ?? '').trim().toLowerCase();
+/** Merge { email: name } into the registry; empty names are ignored (use setName to clear one). */
+export function addPeople(map) {
+  for (const [e, n] of Object.entries(map || {})) {
+    const k = normEmail(e), v = typeof n === 'string' ? n.trim().slice(0, NAME_MAX) : '';
+    if (k && v) PEOPLE.set(k, v);
+  }
+}
+/** Set or clear (empty name) one person's display name. */
+export function setName(email, name) {
+  const k = normEmail(email), v = String(name ?? '').trim().slice(0, NAME_MAX);
+  if (!k) return;
+  if (v) PEOPLE.set(k, v); else PEOPLE.delete(k);
+}
+export const clearPeople = () => PEOPLE.clear();
+export const peopleEmails = () => [...PEOPLE.keys()];
+/** Display name of an email: registered name, else the local part ('' for no email). */
+export const displayName = (email) => (email ? PEOPLE.get(normEmail(email)) || shortName(email) : '');
+/** 'Name <email>' — the datalist choice for a person field. */
+export const personChoice = (email) => `${displayName(email)} <${normEmail(email)}>`;
+/**
+ * Text typed in a person field → { email } ('' = nobody) or { error: 'unknown' | 'ambiguous' }.
+ * Accepts '', 'Name <email>', a bare email, or a display name known for exactly one of `emails`.
+ * `current` (the field's stored email) wins when the text is still its display name.
+ */
+export function resolvePerson(text, emails = [], current = '') {
+  const v = String(text ?? '').trim();
+  if (!v) return { email: '' };
+  const angle = /<\s*([^<>\s]+@[^<>\s]+)\s*>\s*$/.exec(v);
+  if (angle) return { email: normEmail(angle[1]) };
+  if (/^[^\s@<>]+@[^\s@<>]+$/.test(v)) return { email: normEmail(v) };
+  if (current && displayName(current) === v) return { email: normEmail(current) };
+  const want = v.toLowerCase();
+  const hits = [...new Set(emails.map(normEmail).filter(Boolean))].filter((e) => displayName(e).toLowerCase() === want);
+  return hits.length === 1 ? { email: hits[0] } : { error: hits.length ? 'ambiguous' : 'unknown' };
+}
 export function initials(email) {
   const local = shortName(email).replace(/[^\p{L}\p{N}._-]/gu, '');
   if (!local) return '?';
@@ -37,12 +81,27 @@ export const INDEX_PROJECT = '（索引）';
 export function roleFor(me, project) {
   if (!me) return null;
   if (me.owner) return 'owner';
+  const top = topOf(project);
   const roles = me.roles || {};
-  const named = roles[project];
+  const named = roles[top];
   // The index project is owner-only unless a membership names it explicitly: '*' does not cover it.
-  const wild = project === INDEX_PROJECT ? null : roles['*'];
-  return [named, wild].filter((r) => ROLE_RANK[r]).sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0] || null;
+  const wild = top === INDEX_PROJECT ? null : roles['*'];
+  const member = [named, wild].filter((r) => ROLE_RANK[r]).sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0] || null;
+  // A public project (GET /api/me publicProjects) gives every known user the viewer role, never more.
+  return member || (top !== INDEX_PROJECT && (me.publicProjects || []).includes(top) ? 'viewer' : null);
 }
+/** Top-level key of a project or subproject key ('a/b' → 'a'). */
+export const topOf = (p) => String(p ?? '').split('/')[0];
+/** catalog.projects[k].visibility === 'public' (the build puts the effective value on every entry; a missing
+ *  subproject entry falls back to its top level). The index project is never public. */
+export function isPublicProject(projects, key) {
+  const top = topOf(key);
+  if (!key || top === INDEX_PROJECT) return false;
+  const v = projects?.[key]?.visibility ?? projects?.[top]?.visibility;
+  return v === 'public';
+}
+/** External content source of a project or subproject (registry `source`), or ''. */
+export const sourceOfProject = (projects, key) => projects?.[key]?.source || projects?.[topOf(key)]?.source || '';
 export const atLeast = (role, min) => (ROLE_RANK[role] || 0) >= ROLE_RANK[min];
 export const canEdit = (me, doc) => atLeast(roleFor(me, doc.project), 'editor');
 export const isManager = (me) => Boolean(me) && (me.owner || Object.values(me.roles || {}).includes('manager'));
@@ -54,8 +113,10 @@ export function managedProjects(me) {
 }
 export function rolesSummary(me) {
   if (!me) return '';
-  const rows = Object.entries(me.roles || {}).map(([p, r]) => `${p === '*' ? '所有專案' : p}：${r}`);
-  return [me.owner ? 'owner（全部權限）' : '', ...rows].filter(Boolean).join('、') || '尚無專案權限';
+  const rows = Object.entries(me.roles || {}).map(([p, r]) => t('roles.row', { project: p === '*' ? t('roles.all') : label('project', p), role: r }));
+  const pub = me.owner ? [] : (me.publicProjects || []).filter((p) => !me.roles?.[p]);
+  if (pub.length) rows.push(t('roles.public', { list: joinList(pub.map((p) => label('project', p))) }));
+  return joinList([me.owner ? t('roles.owner') : '', ...rows].filter(Boolean)) || t('roles.none');
 }
 
 // ---------- server state ----------
@@ -86,24 +147,25 @@ export const sensitivityPending = (d) => (d.sensitivityPending !== undefined ? B
 export const recency = (d) => `${d.updated_at || d.date || ''}#${String(d.id).padStart(7, '0')}`;
 export const byRecency = (a, b) => (recency(b) > recency(a) ? 1 : recency(b) < recency(a) ? -1 : 0);
 
+// Section titles are UI text: i18n key `home.sec.<key>`.
 export const HOME_SECTIONS = [
-  { key: 'mine', title: '指派給我', needsMe: true, test: (d, me) => normStatus(d.status) === '待處理' && sameEmail(d.assignee, me) },
-  { key: 'review', title: '待我確認', needsMe: true, test: (d, me) => normStatus(d.status) === '待確認' && sameEmail(d.reviewer, me) },
-  { key: 'unassigned', title: '待處理（未指派）', test: (d) => normStatus(d.status) === '待處理' && !d.assignee },
-  { key: 'confirm', title: '待確認', test: (d) => normStatus(d.status) === '待確認' },
-  { key: 'reported', title: '我建立的', needsMe: true, test: (d, me) => sameEmail(d.reporter, me) && normStatus(d.status) !== '封存' },
-  { key: 'recent', title: '最近更新', test: () => true },
-  { key: 'sens', title: '機敏性待複核', test: (d) => sensitivityPending(d) },
+  { key: 'mine', needsMe: true, test: (d, me) => normStatus(d.status) === '待處理' && sameEmail(d.assignee, me) },
+  { key: 'review', needsMe: true, test: (d, me) => normStatus(d.status) === '待確認' && sameEmail(d.reviewer, me) },
+  { key: 'unassigned', test: (d) => normStatus(d.status) === '待處理' && !d.assignee },
+  { key: 'confirm', test: (d) => normStatus(d.status) === '待確認' },
+  { key: 'reported', needsMe: true, test: (d, me) => sameEmail(d.reporter, me) && normStatus(d.status) !== '封存' },
+  { key: 'recent', test: () => true },
+  { key: 'sens', test: (d) => sensitivityPending(d) },
 ];
 
-/** Restrict docs to the 關注的專案 selection (empty = all projects). */
+/** Restrict docs to the focus-projects selection (empty = all projects). */
 export const focusDocs = (docs, focus = []) => (focus?.length ? docs.filter((d) => focus.includes(d.project)) : docs);
 
 /** Home sections for `me` (email or null in static mode): [{ key, title, rows (all, newest first), total }]. */
 export function homeSections(docs, me) {
   return HOME_SECTIONS.filter((s) => me || !s.needsMe).map((s) => {
     const rows = docs.filter((d) => s.test(d, me)).sort(byRecency);
-    return { key: s.key, title: s.title, rows, total: rows.length };
+    return { key: s.key, title: t(`home.sec.${s.key}`), rows, total: rows.length };
   });
 }
 

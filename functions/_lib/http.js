@@ -17,20 +17,41 @@ export const errorJson = (status, message) => json({ error: message }, status);
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function page(status, title, detail) {
-  const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>
+// Error pages are bilingual (English first — the portal's default language — then 繁體中文). JSON errors keep the
+// message as given: clients show their own translated text.
+const PAGE_TEXT = {
+  '尚未開通，請聯絡管理員': { en: 'Your account is not enabled yet. Please contact the administrator.', zh: '尚未開通，請聯絡管理員' },
+  '沒有權限檢視這份文件': { en: 'You do not have permission to view this document.', zh: '沒有權限檢視這份文件' },
+  '機密文件需要 editor 權限': { en: 'This document is confidential: it needs the editor role in its project.', zh: '機密文件需要 editor 權限' },
+  'server mode misconfigured': { en: 'Configuration error: server mode misconfigured', zh: '設定錯誤：伺服器模式設定不完整' },
+  'not found': { en: 'Not found', zh: '找不到這個頁面' },
+  'bad request': { en: 'Bad request', zh: '請求格式錯誤' },
+};
+const STATUS_TEXT = {
+  400: { en: 'Bad request', zh: '請求格式錯誤' }, 403: { en: 'Access denied', zh: '沒有權限' },
+  404: { en: 'Not found', zh: '找不到這個頁面' }, 500: { en: 'Server error', zh: '伺服器錯誤' }, 503: { en: 'Service unavailable', zh: '服務暫時無法使用' },
+};
+
+/** detail: '' | string (shown once, as given) | { en, zh }. */
+function page(status, message, detail) {
+  const t = PAGE_TEXT[message] || { en: message, zh: (STATUS_TEXT[status] || STATUS_TEXT[500]).zh };
+  const d = detail && typeof detail === 'object' ? detail : null;
+  const plain = typeof detail === 'string' && detail && detail !== message ? detail : '';
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(t.en)} · ${esc(t.zh)}</title>
 <style>body{font:16px/1.6 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 16px;color:#222;background:#fff}
+section+section{margin-top:2rem;padding-top:1rem;border-top:1px solid #8884}code{word-break:break-all}
 @media (prefers-color-scheme:dark){body{color:#ddd;background:#16181c}}a{color:inherit}</style></head>
-<body><h1>${esc(title)}</h1><p>${esc(detail)}</p><p><a href="/cdn-cgi/access/logout">登出</a></p></body></html>`;
+<body><section><h1>${esc(t.en)}</h1>${d?.en ? `<p>${esc(d.en)}</p>` : ''}${plain ? `<p><code>${esc(plain)}</code></p>` : ''}<p><a href="/cdn-cgi/access/logout">Sign out</a></p></section>
+<section lang="zh-Hant"><h1>${esc(t.zh)}</h1>${d?.zh ? `<p>${esc(d.zh)}</p>` : ''}<p><a href="/cdn-cgi/access/logout">登出</a></p></section></body></html>`;
   return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
-/** 403 / 404 / 500 as JSON for /api/* and non-navigation fetches, as a small HTML page for navigations. */
+/** 403 / 404 / 500 as JSON for /api/* and non-navigation fetches, as a small bilingual HTML page for navigations. */
 export function deny(request, status, message, detail = '') {
   const url = new URL(request.url);
   const wantsHtml = !url.pathname.startsWith('/api/') && (request.headers.get('accept') || '').includes('text/html');
-  return wantsHtml ? page(status, message, detail || message) : errorJson(status, message);
+  return wantsHtml ? page(status, message, detail) : errorJson(status, message);
 }
 
 /**

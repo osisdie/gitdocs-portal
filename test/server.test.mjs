@@ -146,15 +146,18 @@ test('search-index.json only has rows of visible docs', async () => {
 
 test('/docs/* is gated by project; unknown files are owner-only; /vault.json is always 404', async () => {
   assert.equal((await call('viewer@example.com', '/docs/alpha/a.md')).status, 200);
-  assert.equal((await call('viewer@example.com', '/docs/alpha/sub/b%20%E5%A0%B1%E5%91%8A.html')).status, 200);
-  assert.equal((await call('viewer@example.com', '/docs/alpha/sub/b%20%E5%A0%B1%E5%91%8A')).status !== 403, true, 'pretty URL without .html maps to the doc');
+  assert.equal((await call('viewer@example.com', '/docs/alpha/sub/b%20%E5%A0%B1%E5%91%8A.html')).status, 308, 'Pages redirects x.html to x');
+  const pretty = await call('viewer@example.com', '/docs/alpha/sub/b%20%E5%A0%B1%E5%91%8A');
+  assert.equal(pretty.status, 200, 'pretty URL without .html maps to the doc');
+  assert.equal(pretty.body, '<p>B</p>');
   assert.equal((await call('viewer@example.com', '/docs/beta/c.md')).status, 403);
   assert.equal((await call('star@example.com', '/docs/README.md')).status, 403);
   assert.equal((await call('idx@example.com', '/docs/README.md')).status, 200);
   assert.equal((await call('viewer@example.com', '/docs/stray.txt')).status, 403);
   assert.equal((await call('owner@example.com', '/docs/stray.txt')).status, 200);
   assert.equal((await call('owner@example.com', '/vault.json')).status, 404);
-  assert.equal((await call('viewer@example.com', '/index.html')).status, 200);
+  assert.equal((await call('viewer@example.com', '/')).status, 200);
+  assert.equal((await call('viewer@example.com', '/index.html')).status, 308, 'Pages redirects /index.html to /');
 });
 
 test('percent-encoded, double-slash, dot-segment and mixed-case paths are evaluated after decoding (fail closed)', async () => {
@@ -187,9 +190,10 @@ test('default-deny: only listed shell files pass; files the build adds later are
   for (const p of ['/leak.txt', '/%6Ceak.txt', '/nope', '/docs-backup/c.md', '/icons/../vault.json', '/icons/.hidden', '/icons/a/b.svg']) {
     assert.equal((await call('owner@example.com', p)).status, 404, p);
   }
-  for (const p of ['/', '/index.html', '/app.js', '/sw.js', '/icons/icon.svg', '/%61pp.js']) {
+  for (const p of ['/', '/app.js', '/sw.js', '/icons/icon.svg', '/%61pp.js']) {
     assert.equal((await call('viewer@example.com', p)).status, 200, p);
   }
+  assert.equal((await call('viewer@example.com', '/index.html')).status, 308, 'Pages redirects /index.html to /');
   for (const p of ['/', '/index.html']) assert.equal((await call('viewer@example.com', p)).headers.get('content-security-policy'), SHELL_CSP);
   assert.equal((await call('viewer@example.com', '/app.js')).headers.get('content-security-policy'), null);
 });
@@ -373,21 +377,22 @@ test('POST /api/users: managers invite only into projects they manage; history w
   assert.deepEqual(rows("SELECT action FROM history WHERE actor = 'manager@example.com' ORDER BY id").map((x) => x.action), ['user.create', 'membership']);
   // new user can now sign in
   assert.equal((await call('new@example.com', '/api/me')).status, 200);
-  // existing user invited by another project's manager: memberships merge
+  // existing user invited by another project's manager: memberships merge; the answer does not tell it existed
   r = await call('bmanager@example.com', '/api/users', { method: 'POST', body: { email: 'new@example.com', memberships: [{ project: 'beta', role: 'viewer' }] } });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.existing, true);
-  assert.deepEqual(r.body.user.memberships, [{ project: 'beta', role: 'viewer' }], 'bmanager sees only beta rows');
+  assert.equal(r.status, 201);
+  assert.equal('existing' in r.body, false);
+  assert.deepEqual(r.body.user, { email: 'new@example.com', memberships: [{ project: 'beta', role: 'viewer' }] }, 'bmanager sees only beta rows');
+  assert.deepEqual(rows("SELECT project FROM memberships WHERE email = 'new@example.com' ORDER BY project").map((x) => x.project), ['alpha', 'beta']);
 });
 
 test('PATCH /api/users/:email: managers edit only their rows, owners disable; DELETE disables', async () => {
   let r = await call('manager@example.com', '/api/users/mixed@example.com', { method: 'PATCH', body: { memberships: [{ project: 'beta', role: null }] } });
-  assert.equal(r.status, 403);
+  assert.equal(r.status, 404, 'a user the manager does not manage looks like a missing one');
   r = await call('manager@example.com', '/api/users/viewer@example.com', { method: 'PATCH', body: { memberships: [{ project: 'alpha', role: 'editor' }] } });
   assert.equal(r.status, 200);
   assert.deepEqual(r.body.user.memberships, [{ project: 'alpha', role: 'editor' }]);
   assert.equal((await call('manager@example.com', '/api/users/viewer@example.com', { method: 'PATCH', body: { disabled: true } })).status, 403);
-  assert.equal((await call('manager@example.com', '/api/users/owner@example.com', { method: 'PATCH', body: { name: 'x' } })).status, 403);
+  assert.equal((await call('manager@example.com', '/api/users/owner@example.com', { method: 'PATCH', body: { name: 'x' } })).status, 404);
   r = await call('manager@example.com', '/api/users/viewer@example.com', { method: 'PATCH', body: { memberships: [{ project: 'alpha', role: null }] } });
   assert.equal(r.status, 200);
   assert.equal(rows("SELECT * FROM memberships WHERE email = 'viewer@example.com'").length, 0);
@@ -445,7 +450,8 @@ test('Access group sync writes the full set from D1, keeps non-email rules, and 
   // losing the last membership removes the user; a new membership adds them back; losing one of several changes nothing
   await call('manager@example.com', '/api/users/viewer@example.com', opts({ method: 'PATCH', body: { memberships: [] } }));
   assert.deepEqual(cf.emails(), GROUP_BASE.filter((e) => e !== 'viewer@example.com'));
-  await call('manager@example.com', '/api/users/viewer@example.com', opts({ method: 'PATCH', body: { memberships: [{ project: 'alpha', role: 'viewer' }] } }));
+  // without a membership in their project the user is out of the manager's reach: they invite them again
+  await call('manager@example.com', '/api/users', opts({ method: 'POST', body: { email: 'viewer@example.com', memberships: [{ project: 'alpha', role: 'viewer' }] } }));
   assert.deepEqual(cf.emails(), GROUP_BASE);
   const puts = cf.puts;
   await call('owner@example.com', '/api/users/mixed@example.com', opts({ method: 'PATCH', body: { memberships: [{ project: 'beta', role: 'editor' }] } }));

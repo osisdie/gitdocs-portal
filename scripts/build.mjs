@@ -12,12 +12,20 @@
 //  4. Vault: vault/vault.json (ciphertext only) → dist/vault.json. HTML docs that reference {{vault:…}} get the
 //     site/vault-frame.js shim inlined: docs are served sandboxed (opaque origin, see site/_headers), so the shim only
 //     masks fields and asks the portal to show a value in the portal's own dialog — it never sees keys or plaintext.
+//  5. External sources (catalog.json → site.sources, checked out by `npm run sources:pull`): files under
+//     .sources/<name>/<path>/ are deployed at docs/<projectRoot>/<name>/ with the same sensitivity rules; their
+//     {{vault:…}} references outside <name>/ are replaced by {{vault-blocked}} and never listed on the record.
+//     A source that is not checked out keeps its catalog entries but deploys nothing (warning).
+//     A source's own vault/vault.json (ciphertext, its own passphrase) is deployed as _vaults/<source>.json with only
+//     the names under <source>/; the server opens it with VAULT_KEY_<SOURCE> and never serves it. Only server builds
+//     emit it (--server, or a wrangler.toml with a [[d1_databases]] binding): a static host would serve the file.
+//  DIST_DIR=<dir> builds somewhere other than dist/ (tests).
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, CONTENT, DOCS, VAULT_FILE, NOTES_DIR, SENSITIVITIES, sensRank, loadCatalog, saveCatalog, syncCatalog, toRecord, gitHistory, PEOPLE_FIELDS } from './lib/catalog.mjs';
+import { ROOT, CONTENT, DOCS, VAULT_FILE, NOTES_DIR, SENSITIVITIES, sensRank, loadCatalog, saveCatalog, syncCatalog, toRecord, gitHistory, PEOPLE_FIELDS, mountFiles, stripBlockedRefs, visibilityOf, sourceEnvName, tenantVaultFile } from './lib/catalog.mjs';
 
 const SITE = path.join(ROOT, 'site');
-const DIST = path.join(ROOT, 'dist');
+const DIST = process.env.DIST_DIR ? path.resolve(process.env.DIST_DIR) : path.join(ROOT, 'dist');
 const TEXT_CAP = 40000;
 const argv = process.argv.slice(2);
 const checkOnly = argv.includes('--check');
@@ -27,18 +35,59 @@ if (maxArg && !SENSITIVITIES.includes(maxArg)) {
   process.exit(2);
 }
 const maxRank = maxArg ? sensRank(maxArg) : Infinity;
-const withVault = !argv.includes('--no-vault') && !maxArg && fs.existsSync(VAULT_FILE);
+const vaultsAllowed = !argv.includes('--no-vault') && !maxArg; // share builds and --no-vault deploy no vault at all
+// Server mode is what keeps /_vaults/* private (the gate answers 404); a static host has no way to, so tenant vaults
+// are emitted only for a server build. Same test as scripts/deploy.sh and the CI templates.
+const hasD1 = (dir) => { try { return /^\[\[d1_databases\]\]/m.test(fs.readFileSync(path.join(dir, 'wrangler.toml'), 'utf8')); } catch { return false; } };
+const serverBuild = argv.includes('--server') || hasD1(ROOT) || hasD1(CONTENT);
+const withVault = vaultsAllowed && fs.existsSync(VAULT_FILE);
 
 const catalog = loadCatalog();
-const { items, added, missing, raised } = syncCatalog(catalog);
+let sync;
+try {
+  sync = syncCatalog(catalog, { onSkip: (rel, why) => console.warn(`⚠ skipped ${rel}: ${why}`) });
+} catch (e) {
+  console.error(`✗ ${e.message}`);
+  process.exit(1);
+}
+const { items, added, missing, raised, held, mounts, unavailable, warnings } = sync;
 for (const r of raised) console.warn(`⚠ sensitivity raised: ${r}`);
+for (const w of warnings) console.warn(`⚠ ${w}`);
+for (const name of unavailable) {
+  const n = held.filter((k) => k.startsWith(`${mounts.find((m) => m.name === name).prefix}/`)).length;
+  console.warn(`⚠ source "${name}" is not checked out (.sources/${name}; run npm run sources:pull, credentials via ${sourceEnvName(name)}): ${n} catalog entries kept but not deployed`);
+}
+for (const it of items) {
+  for (const n of it.blockedRefs) console.warn(`⚠ ${it.rel} (source ${it.source}) references {{vault:${n}}} outside ${it.source}/ — not exposed`);
+}
 
 const vault = fs.existsSync(VAULT_FILE) ? JSON.parse(fs.readFileSync(VAULT_FILE, 'utf8')) : null;
-const unknownRefs = [...new Set(items.flatMap((it) => it.vaultRefs))].filter((n) => !vault?.secrets?.[n]);
-for (const n of unknownRefs) console.warn(`⚠ {{vault:${n}}} is referenced but not in ${path.relative(CONTENT, VAULT_FILE)}`);
+
+// tenant vaults: { source → { vault (only <source>/ names), foreign: [names ignored] } }
+const tenantVaults = new Map();
+for (const m of mounts) {
+  const f = tenantVaultFile(m);
+  if (!f) continue;
+  let v;
+  try { v = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { console.warn(`⚠ source "${m.name}": vault/vault.json is not valid JSON (${e.message}) — ignored`); continue; }
+  if (!v || typeof v !== 'object' || !v.kdf?.salt || !v.check?.ct || !v.secrets || typeof v.secrets !== 'object') {
+    console.warn(`⚠ source "${m.name}": vault/vault.json is not a gitdocs vault — ignored`);
+    continue;
+  }
+  const kept = {}, foreign = [];
+  for (const [n, box] of Object.entries(v.secrets)) {
+    if (n.startsWith(`${m.name}/`) && box && typeof box.iv === 'string' && typeof box.ct === 'string') kept[n] = { iv: box.iv, ct: box.ct, note: typeof box.note === 'string' ? box.note : '', updated: typeof box.updated === 'string' ? box.updated : '' };
+    else foreign.push(n);
+  }
+  for (const n of foreign) console.warn(`⚠ source "${m.name}": vault secret "${n}" is outside ${m.name}/ — ignored`);
+  tenantVaults.set(m.name, { version: v.version, kdf: v.kdf, check: v.check, secrets: kept });
+}
+const inSomeVault = (it, n) => !!vault?.secrets?.[n] || !!tenantVaults.get(it.source)?.secrets?.[n];
+const unknownRefs = [...new Set(items.flatMap((it) => it.vaultRefs.filter((n) => !inSomeVault(it, n))))];
+for (const n of unknownRefs) console.warn(`⚠ {{vault:${n}}} is referenced but not in ${path.relative(CONTENT, VAULT_FILE)} or a source vault (fine if it lives in the web vault)`);
 
 if (checkOnly) {
-  console.log(`docs: ${items.length}, new: ${added.length}, removed: ${missing.length}, raised: ${raised.length}, unknown vault refs: ${unknownRefs.length}`);
+  console.log(`docs: ${items.length}, new: ${added.length}, removed: ${missing.length}, raised: ${raised.length}, unknown vault refs: ${unknownRefs.length}${mounts.length ? `, sources: ${mounts.length} (not checked out: ${unavailable.length}, held entries: ${held.length})` : ''}`);
   process.exit(0);
 }
 saveCatalog(catalog);
@@ -46,16 +95,19 @@ saveCatalog(catalog);
 const builtAt = new Date().toISOString();
 const records = [], search = [], excluded = new Set();
 let dropped = 0;
+const blocked = new Map(); // abs → source, for mounted files whose deployed copy must have refs rewritten
 for (const it of items) {
-  const abs = path.join(CONTENT, it.rel);
+  const abs = it.loc.abs;
+  if (it.blockedRefs.length) blocked.set(abs, it.source);
   const rank = sensRank(it.entry.sensitivity);
   if (it.entry.hidden || rank > maxRank) { excluded.add(abs); dropped++; continue; }
   const rec = toRecord(it);
   // `doc set sensitivity=` always marks a doc reviewed, so above 內部 without that mark means "detected, not reviewed"
-  if (!it.entry.sensitivityReviewed && rank > sensRank('內部')) rec.sensitivityPending = true;
+  // so is a file larger than SCAN_MAX_BYTES: the PII heuristics did not see all of it (fail closed: flag it for review)
+  if (!it.entry.sensitivityReviewed && (rank > sensRank('內部') || it.truncated)) rec.sensitivityPending = true;
   delete rec.sensitivityReviewed;
   if (maxArg) for (const k of PEOPLE_FIELDS) delete rec[k]; // share builds leave the organisation: no staff emails
-  rec.history = gitHistory(it.rel);
+  rec.history = gitHistory(it.rel, 20, it.loc);
   if (rank >= sensRank('極機密')) { rec.offline = true; excluded.add(abs); }
   else if (rank >= sensRank('機密')) rec.gated = true;
   else search.push({ id: rec.id, t: it.text.slice(0, TEXT_CAP) });
@@ -72,14 +124,35 @@ fs.cpSync(DOCS, DIST_DOCS, {
   recursive: true,
   filter: (s) => !path.basename(s).includes(':') && !excluded.has(s) && s !== path.join(DOCS, 'catalog.json') && s !== NOTES_DIR,
 });
+// mounted sources: regular files only (mountFiles never returns symlinks or dot-files), same exclusions as local docs
+let mountedCopied = 0;
+for (const m of mounts) {
+  for (const f of mountFiles(m)) {
+    if (excluded.has(f.abs)) continue;
+    const dest = path.join(DIST, ...f.rel.split('/'));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    if (blocked.has(f.abs)) fs.writeFileSync(dest, stripBlockedRefs(fs.readFileSync(f.abs, 'utf8'), blocked.get(f.abs)));
+    else fs.copyFileSync(f.abs, dest);
+    mountedCopied++;
+  }
+}
 if (withVault) fs.copyFileSync(VAULT_FILE, path.join(DIST, 'vault.json'));
+if (vaultsAllowed && !serverBuild && tenantVaults.size) {
+  console.warn(`⚠ source vaults not deployed: this is not a server build (no [[d1_databases]] in wrangler.toml, no --server) and a static host would serve dist/_vaults/ to anyone`);
+}
+if (vaultsAllowed && serverBuild) {
+  for (const [name, v] of tenantVaults) {
+    fs.mkdirSync(path.join(DIST, '_vaults'), { recursive: true });
+    fs.writeFileSync(path.join(DIST, '_vaults', `${name}.json`), JSON.stringify(v));
+  }
+}
 
 // HTML docs with vault fields get the masking shim inlined (a sandboxed doc cannot load portal scripts with cookies).
 const TAG = `<script>${fs.readFileSync(path.join(SITE, 'vault-frame.js'), 'utf8').replace(/<\/script/gi, '<\\/script')}</script>`;
 let injected = 0;
 for (const it of items) {
-  if (it.type !== 'html' || !it.vaultRefs.length) continue;
-  const f = path.join(DIST_DOCS, path.relative(DOCS, path.join(CONTENT, it.rel)));
+  if (it.type !== 'html' || (!it.vaultRefs.length && !(it.blockedRefs || []).length)) continue; // blocked-only docs still need the shim to mask {{vault-blocked}}
+  const f = path.join(DIST, ...it.rel.split('/'));
   if (!fs.existsSync(f)) continue;
   const html = fs.readFileSync(f, 'utf8');
   fs.writeFileSync(f, /<\/body>/i.test(html) ? html.replace(/<\/body>(?![\s\S]*<\/body>)/i, `${TAG}</body>`) : html + TAG);
@@ -87,18 +160,38 @@ for (const it of items) {
 }
 
 records.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+// visibility: every registry entry carries the effective value (subprojects inherit the top-level one);
+// mounts are flagged with `source`. site.sources (repo URLs) is not deployed.
+const mountNames = new Set(mounts.map((m) => m.name));
+const projectsOut = Object.fromEntries(Object.entries(catalog.projects).map(([k, v]) => {
+  const top = k.split('/')[0];
+  const out = { ...v, visibility: visibilityOf(catalog.projects, k) };
+  delete out.source;
+  if (mountNames.has(top) && !v.parent && !k.includes('/')) out.source = top;
+  return [k, out];
+}));
+const { sources: _sources, people: sitePeople, ...siteOut } = catalog.site;
+// site.people { email: display name } (static-mode names; server mode trims it per user): emails lower-cased, names
+// trimmed to 80 characters; share builds leave the organisation, so they drop it with the other staff emails
+if (sitePeople && typeof sitePeople === 'object' && !Array.isArray(sitePeople) && !maxArg) {
+  siteOut.people = Object.fromEntries(Object.entries(sitePeople)
+    .filter(([e, n]) => /^[^\s@]+@[^\s@]+$/.test(e) && typeof n === 'string' && n.trim())
+    .map(([e, n]) => [e.toLowerCase(), n.trim().replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').slice(0, 80)]));
+}
 const out = {
   builtAt,
   maxSensitivity: maxArg || null,
-  site: catalog.site,
+  site: siteOut,
   vault: withVault,
   categories: catalog.categories, statuses: catalog.statuses, sensitivities: catalog.sensitivities,
-  projects: catalog.projects, filters: catalog.filters,
+  projects: projectsOut, filters: catalog.filters,
   docs: records,
 };
 fs.writeFileSync(path.join(DIST, 'catalog.json'), JSON.stringify(out));
 fs.writeFileSync(path.join(DIST, 'search-index.json'), JSON.stringify(search));
 
 const n = (lvl) => records.filter((r) => r.sensitivity === lvl).length;
-const vaultNote = vault ? `; vault: ${Object.keys(vault.secrets).length} secrets${withVault ? '' : ' (not deployed)'}, ${injected} html docs wired` : '';
-console.log(`built ${records.length} docs → dist/  (${SENSITIVITIES.map((s) => `${s} ${n(s)}`).join(' · ')}; new: ${added.length}${added.length ? ' — ' + added.join(', ') : ''}; removed: ${missing.length}${dropped ? `; dropped: ${dropped}` : ''}${vaultNote})`);
+const vaultNote = (vault ? `; vault: ${Object.keys(vault.secrets).length} secrets${withVault ? '' : ' (not deployed)'}, ${injected} html docs wired` : '')
+  + (tenantVaults.size ? `; source vaults: ${[...tenantVaults].map(([n, v]) => `${n} ${Object.keys(v.secrets).length}`).join(', ')}${vaultsAllowed && serverBuild ? '' : ' (not deployed)'}` : '');
+const srcNote = mounts.length ? `; sources: ${mounts.length - unavailable.length}/${mounts.length} mounted, ${mountedCopied} files${held.length ? `, ${held.length} held back` : ''}` : '';
+console.log(`built ${records.length} docs → ${path.relative(ROOT, DIST) || '.'}/  (${SENSITIVITIES.map((s) => `${s} ${n(s)}`).join(' · ')}; new: ${added.length}${added.length ? ' — ' + added.join(', ') : ''}; removed: ${missing.length}${dropped ? `; dropped: ${dropped}` : ''}${vaultNote}${srcNote})`);

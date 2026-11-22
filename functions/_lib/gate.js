@@ -3,7 +3,8 @@
 import { callerEmail, loadUser } from './auth.js';
 import { canSee } from './roles.js';
 import { deny, json, sameOriginJson } from './http.js';
-import { assetJson, loadCatalog, catalogFor, searchIndexFor, docByPath } from './assets.js';
+import { assetJson, loadCatalog, catalogFor, searchIndexFor, docByPath, publicOf, isRestricted } from './assets.js';
+import { visiblePeople } from './people.js';
 
 const NOT_ENABLED = '尚未開通，請聯絡管理員';
 
@@ -12,8 +13,10 @@ const NOT_ENABLED = '尚未開通，請聯絡管理員';
 export const SHELL_FILES = new Set([
   '/', '/index.html', '/app.js', '/app.css', '/query.js', '/model.js', '/api.js', '/admin.js', '/graph.js',
   '/graph.css', '/vault.js', '/vault-core.js', '/vault-frame.js', '/sw.js', '/manifest.webmanifest', '/robots.txt',
+  '/i18n.js',
 ]);
-const SHELL_DIR_RE = /^\/icons\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// one level of plain file names in the shell's asset folders (icons, UI translations)
+const SHELL_DIR_RE = /^\/(icons|i18n)\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const isShellPath = (p) => SHELL_FILES.has(p) || SHELL_DIR_RE.test(p);
 
 export const DOC_CSP = 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads';
@@ -37,13 +40,52 @@ export function normalizePath(rawPathname) {
 /** URL path for a normalised path, each segment encoded, so the asset server decodes it back to exactly `p`. */
 export const encodePath = (p) => p.split('/').map(encodeURIComponent).join('/');
 
-/** Catalog path for a normalised /docs/… path, trying the forms Pages serves (pretty URLs drop .html, folders → index.html). */
-export function docForUrl(catalog, path) {
+/**
+ * Every file the Pages asset server may answer `path` with a body, in its lookup order: '/x/' → x/index.html;
+ * '/x/index' → itself; otherwise x, then x.html. Forms that only redirect are left out: the redirect target comes back
+ * through the gate. This models Cloudflare Pages' asset server (wrangler pages generateHandler, the auto-trailing-slash
+ * behaviour); Workers static assets with another html_handling mode resolve differently and are not supported.
+ */
+export function servedCandidates(path) {
   const p = path.replace(/^\/+/, '');
-  const bare = p.replace(/\/+$/, '');
-  for (const c of [p, `${bare}.html`, `${bare}/index.html`]) {
-    const d = docByPath(catalog, c);
-    if (d) return d;
+  if (p.endsWith('/')) return [`${p}index.html`];
+  if (p.endsWith('/index')) return [p];
+  return [p, `${p}.html`];
+}
+
+/**
+ * Whether a file `p` sits next to `p.html`. Pages serves '/p.html' only when an extensionless `p` also exists and
+ * otherwise redirects to '/p'; anything but that redirect counts as "exists" (fail closed).
+ */
+async function siblingExists(env, request, p) {
+  const probe = new Request(new URL(encodePath(`/${p}.html`), request.url), { method: 'HEAD', redirect: 'manual' });
+  const res = await env.ASSETS.fetch(probe);
+  return !(res.status >= 300 && res.status < 400);
+}
+
+/**
+ * null when `user` may read whatever the asset server serves for `path`, else { status, msg }. Every deployed catalog
+ * doc among the candidates must be readable (not just the first one), and a file the catalog does not know is
+ * owner-only wherever it could be served: with no deployed doc among the candidates, or ahead of the first one (an
+ * extensionless `x` beside doc `x.html`). After a deployed doc nothing can be served: Pages stops at it.
+ * An `offline` doc (極機密, not deployed) is no doc here: its path can only be some other, unknown file.
+ */
+export async function docRefusal(env, request, user, catalog, path) {
+  const cands = servedCandidates(path).map((c) => {
+    const doc = docByPath(catalog, c);
+    return { path: c, doc: doc && !doc.offline ? doc : null };
+  });
+  const first = cands.findIndex((c) => c.doc);
+  if (user.owner) return null;
+  if (first < 0) return { status: 403, msg: '沒有權限檢視這份文件' };
+  const pub = publicOf(catalog);
+  for (const { doc } of cands) {
+    if (!doc) continue;
+    if (!canSee(user, doc.project, pub)) return { status: 403, msg: '沒有權限檢視這份文件' };
+    if (isRestricted(user, doc)) return { status: 403, msg: '機密文件需要 editor 權限' };
+  }
+  for (const c of cands.slice(0, first)) {
+    if (await siblingExists(env, request, c.path)) return { status: 403, msg: '沒有權限檢視這份文件' };
   }
   return null;
 }
@@ -74,7 +116,11 @@ export async function gate(ctx, deps = {}) {
   const who = await callerEmail(request, env, deps);
   if (who.error) return deny(request, who.status, NOT_ENABLED, who.error);
   const user = await loadUser(env.DB, env, who.email);
-  if (!user) return deny(request, 403, NOT_ENABLED, `${who.email} 尚未開通，請聯絡管理員。`);
+  if (!user) {
+    return deny(request, 403, NOT_ENABLED, {
+      en: `${who.email} is not enabled yet. Please contact the administrator.`, zh: `${who.email} 尚未開通，請聯絡管理員。`,
+    });
+  }
   ctx.data = ctx.data || {};
   ctx.data.user = user;
 
@@ -91,16 +137,20 @@ export async function gate(ctx, deps = {}) {
     }
     return next();
   }
-  if (path === '/catalog.json') return json(catalogFor(user, await loadCatalog(env, request)));
+  if (path === '/catalog.json') {
+    const catalog = await loadCatalog(env, request);
+    const people = catalog.site?.people ? await visiblePeople(env.DB, env, user, catalog) : null;
+    return json(catalogFor(user, catalog, people));
+  }
   if (path === '/search-index.json') {
     const catalog = await loadCatalog(env, request);
     const rows = await assetJson(env, request, '/search-index.json');
     return json(searchIndexFor(user, catalog, rows));
   }
   if (path === '/docs' || path.startsWith('/docs/')) {
-    const doc = docForUrl(await loadCatalog(env, request), path);
-    const allowed = doc ? canSee(user, doc.project) : user.owner;
-    if (!allowed) return deny(request, 403, '沒有權限檢視這份文件');
+    const catalog = await loadCatalog(env, request);
+    const refused = await docRefusal(env, request, user, catalog, path);
+    if (refused) return deny(request, refused.status, refused.msg);
     // set here, not only in _headers: _headers rules match the raw path; private: access can be revoked
     return withHeaders(forward(ctx, path), {
       'content-security-policy': DOC_CSP, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-cache',

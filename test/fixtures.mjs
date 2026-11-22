@@ -41,6 +41,7 @@ export async function vaultFixture() {
   const key = await deriveKey(PASS, vault.kdf, true);
   vault.secrets['alpha/token'] = await seal(key, 'alpha/token', 'alpha-secret-value');
   vault.secrets['beta/token'] = await seal(key, 'beta/token', 'beta-secret-value');
+  vault.secrets['acme/token'] = await seal(key, 'acme/token', 'acme-secret-value');
   vaultCache = { vault, rawKey: await exportKey(key) };
   return vaultCache;
 }
@@ -55,7 +56,8 @@ export const USERS = [
   ['bmanager@example.com', [['beta', 'manager']]],
 ];
 
-export async function makeEnv(extra = {}) {
+/** extraFiles: deployed files added to (or replacing) the fixture's, served by one asset server with the real lookup order. */
+export async function makeEnv(extra = {}, extraFiles = {}) {
   const db = createD1();
   const at = '2026-11-01T00:00:00.000Z';
   for (const [email, rows] of USERS) {
@@ -78,6 +80,7 @@ export async function makeEnv(extra = {}) {
     '/docs/beta/c.md': '# C',
     '/docs/README.md': '# Index',
     '/docs/stray.txt': 'not in catalog',
+    ...extraFiles,
   };
   return {
     DB: db, ASSETS: assets(files),

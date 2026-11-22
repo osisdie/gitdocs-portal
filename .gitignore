@@ -9,6 +9,7 @@
 # build / tooling
 node_modules/
 dist/
+.sources/
 .wrangler/
 .playwright-mcp/
 .DS_Store

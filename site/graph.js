@@ -1,4 +1,4 @@
-// 關聯圖 — knowledge-graph view: documents, projects and keywords as a force-directed network.
+// Graph view (關聯圖) — knowledge graph: documents, projects and keywords as a force-directed network.
 //
 // Libraries are loaded lazily, only when the view opens:
 //   graphology 0.26.0 and Sigma.js 3.0.3 — UMD builds from cdnjs (globals `graphology` / `Sigma`), pinned + SRI.
@@ -7,7 +7,8 @@
 //     SRI is not possible for `+esm` (generated files), hence exact versions in the URL.
 //
 // The top of this file (buildGraphData and helpers) is pure: Node can import it without a DOM or network.
-import { sensRank } from './query.js';
+import { sensRank, SENSITIVITIES } from './query.js';
+import { t, th, label } from './i18n.js';
 
 const LIBS = {
   graphology: ['https://cdnjs.cloudflare.com/ajax/libs/graphology/0.26.0/graphology.umd.min.js',
@@ -38,7 +39,7 @@ const projOf = (d) => d.project + (d.subproject ? `/${d.subproject}` : '');
 const inScope = (d, p) => !p || d.project === p || projOf(d) === p;
 const termsOf = (d) => [...new Set([...(d.tags || []), ...(d.keywords || [])].filter(Boolean))];
 const clip = (s, n = LABEL_MAX) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const isLocked = (d) => sensRank(d.sensitivity) >= sensRank('機密');
+const isLocked = (d) => sensRank(d.sensitivity) >= 2; // confidential (機密) and above
 const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 function hashString(s) {
@@ -172,7 +173,7 @@ export function buildGraphData(docs = [], { projects = {}, scope = '', similarCa
   };
 
   for (const d of shown) {
-    const top = hub(d.project, projects[d.project]?.title || d.project, d.project);
+    const top = hub(d.project, label('project', projects[d.project]?.title || d.project), d.project);
     let home = top;
     if (d.subproject) {
       const subKey = projOf(d);
@@ -228,7 +229,7 @@ export function buildGraphData(docs = [], { projects = {}, scope = '', similarCa
   return {
     nodes: list,
     edges,
-    projects: shownTops.map((k) => ({ key: k, title: projects[k]?.title || k, pi: slot.get(k) ?? 0 })),
+    projects: shownTops.map((k) => ({ key: k, title: label('project', projects[k]?.title || k), pi: slot.get(k) ?? 0 })),
     slots: slot.size || 1,
     stats: { docs: shown.length, nodes: list.length, edges: edges.length, similar: sims.length,
       keywords: list.filter((n) => n.kind === 'keyword').length },
@@ -339,36 +340,36 @@ const layerOf = (kind) => ({ keyword: 'keyword', project: 'project', similar: 's
 function legendHtml(data, theme) {
   const sw = (c) => `<i class="gx-dot" style="background:${esc(c)}"></i>`;
   const ln = (c, arrow) => `<i class="gx-line${arrow ? ' gx-arrow' : ''}" style="--c:${esc(c)}"></i>`;
-  return `<summary>圖例</summary>
-    <div class="gx-leg-row"><b>專案</b>${data.projects.map((p) => `<span>${sw(theme.palette[p.pi])}${esc(p.title)}</span>`).join('')}</div>
-    <div class="gx-leg-row"><b>節點</b><span>${sw(theme.muted)}文件（越大＝關聯越多）</span><span><i class="gx-dot gx-hub" style="background:${esc(theme.muted)}"></i>專案／子專案</span><span>${sw(theme.keyword)}<small>關鍵字／標籤</small></span><span>🔒 機密／極機密</span></div>
-    <div class="gx-leg-row"><b>連線</b><span>${ln(theme.edge.related)}相關</span><span>${ln(theme.edge.supersedes, true)}取代（新 → 舊）</span><span>${ln(theme.edge.similar)}相似（共同關鍵字）</span><span>${ln(theme.edge.project)}專案</span><span>${ln(theme.edge.keyword)}關鍵字</span></div>`;
+  return `<summary>${th('graph.legend')}</summary>
+    <div class="gx-leg-row"><b>${th('graph.projects')}</b>${data.projects.map((p) => `<span>${sw(theme.palette[p.pi])}${esc(p.title)}</span>`).join('')}</div>
+    <div class="gx-leg-row"><b>${th('graph.nodes')}</b><span>${sw(theme.muted)}${th('graph.nodeDoc')}</span><span><i class="gx-dot gx-hub" style="background:${esc(theme.muted)}"></i>${th('graph.nodeProject')}</span><span>${sw(theme.keyword)}<small>${th('graph.nodeKeyword')}</small></span><span>🔒 ${th('graph.nodeLocked', { a: label('sens', SENSITIVITIES[2]), b: label('sens', SENSITIVITIES[3]) })}</span></div>
+    <div class="gx-leg-row"><b>${th('graph.edges')}</b><span>${ln(theme.edge.related)}${th('graph.edgeRelated')}</span><span>${ln(theme.edge.supersedes, true)}${th('graph.edgeSupersedes')}</span><span>${ln(theme.edge.similar)}${th('graph.edgeSimilar')}</span><span>${ln(theme.edge.project)}${th('graph.edgeProject')}</span><span>${ln(theme.edge.keyword)}${th('graph.edgeKeyword')}</span></div>`;
 }
 
 function shellHtml(data, scope, site) {
   const docs = data.nodes.filter((n) => n.kind === 'doc');
-  const where = scope ? `專案 ${scope}` : (site?.title || '全部專案');
-  return `<section class="gx" aria-label="關聯圖">
-    <div class="gx-bar" role="toolbar" aria-label="關聯圖工具">
-      <label class="gx-search"><span class="sr">在圖中尋找</span>
-        <input type="search" list="gx-names" placeholder="找文件、專案或關鍵字…" autocomplete="off" enterkeyhint="search"></label>
+  const where = scope ? t('graph.whereProject', { project: label('project', scope) }) : (site?.title || t('home.allProjects'));
+  return `<section class="gx" aria-label="${th('nav.graph')}">
+    <div class="gx-bar" role="toolbar" aria-label="${th('graph.toolbar')}">
+      <label class="gx-search"><span class="sr">${th('graph.find')}</span>
+        <input type="search" list="gx-names" placeholder="${th('graph.findPh')}" autocomplete="off" enterkeyhint="search"></label>
       <datalist id="gx-names">${[...new Set(data.nodes.map((n) => n.fullLabel.replace(LOCK, '')))].map((l) => `<option value="${esc(l)}"></option>`).join('')}</datalist>
-      <fieldset class="gx-layers"><legend class="sr">圖層</legend>
-        <label><input type="checkbox" data-layer="keyword" checked>關鍵字</label>
-        <label><input type="checkbox" data-layer="similar" checked>相似</label>
-        <label><input type="checkbox" data-layer="project" checked>專案</label>
+      <fieldset class="gx-layers"><legend class="sr">${th('graph.layers')}</legend>
+        <label><input type="checkbox" data-layer="keyword" checked>${th('graph.layerKeyword')}</label>
+        <label><input type="checkbox" data-layer="similar" checked>${th('graph.layerSimilar')}</label>
+        <label><input type="checkbox" data-layer="project" checked>${th('graph.layerProject')}</label>
       </fieldset>
       <div class="gx-btns">
-        <button type="button" data-act="relayout">重新排列</button>
-        <button type="button" data-act="in" aria-label="放大" title="放大">＋</button>
-        <button type="button" data-act="out" aria-label="縮小" title="縮小">－</button>
-        <button type="button" data-act="reset" aria-label="重設視角" title="重設視角">⟲</button>
+        <button type="button" data-act="relayout">${th('graph.relayout')}</button>
+        <button type="button" data-act="in" aria-label="${th('graph.zoomIn')}" title="${th('graph.zoomIn')}">＋</button>
+        <button type="button" data-act="out" aria-label="${th('graph.zoomOut')}" title="${th('graph.zoomOut')}">－</button>
+        <button type="button" data-act="reset" aria-label="${th('graph.resetView')}" title="${th('graph.resetView')}">⟲</button>
       </div>
       <span class="gx-status" role="status" aria-live="polite"></span>
     </div>
-    <div class="gx-stage" role="img" aria-label="關聯圖：${esc(where)}，${data.stats.docs} 份文件、${data.stats.edges} 條連線。滑鼠移到節點上會標示相鄰節點，點一下開啟。文件清單在圖下方（螢幕閱讀器可讀）。"></div>
+    <div class="gx-stage" role="img" aria-label="${th('graph.stageAria', { where, docs: data.stats.docs, edges: data.stats.edges })}"></div>
     <details class="gx-legend"${matchMedia('(min-width: 761px)').matches ? ' open' : ''}></details>
-    <nav class="sr" aria-label="圖中的文件"><ul>${docs.map((n) => `<li><a href="${esc(n.href)}">${esc(n.fullLabel.replace(LOCK, ''))}</a>${n.locked ? '（機密）' : ''}</li>`).join('')}</ul></nav>
+    <nav class="sr" aria-label="${th('graph.docList')}"><ul>${docs.map((n) => `<li><a href="${esc(n.href)}">${esc(n.fullLabel.replace(LOCK, ''))}</a>${n.locked ? th('graph.lockedMark') : ''}</li>`).join('')}</ul></nav>
   </section>`;
 }
 
@@ -456,7 +457,7 @@ function status(ctx, text) {
   const el = ctx.root.querySelector('.gx-status');
   if (el) el.textContent = text;
 }
-const summary = (ctx) => `${ctx.data.stats.docs} 份文件 · ${ctx.data.stats.nodes} 節點 · ${ctx.data.stats.edges} 連線`;
+const summary = (ctx) => t('graph.summary', { docs: ctx.data.stats.docs, nodes: ctx.data.stats.nodes, edges: ctx.data.stats.edges });
 
 function stopLayout(ctx) {
   if (ctx.layout) { ctx.layout.kill(); ctx.layout = null; }
@@ -474,7 +475,7 @@ function runLayout(ctx) {
   stopLayout(ctx);
   const { graph, libs } = ctx;
   const settings = { ...libs.forceAtlas2.inferSettings(graph), edgeWeightInfluence: 1 };
-  status(ctx, '排列中…');
+  status(ctx, t('graph.layingOut'));
   if (libs.FA2Layout && typeof Worker === 'function') {
     try {
       const layout = new libs.FA2Layout(graph, { settings, getEdgeWeight: 'weight' });
@@ -538,7 +539,7 @@ function bindToolbar(ctx) {
   const input = root.querySelector('.gx-search input');
   const search = () => {
     const key = findNode(ctx, input.value);
-    if (key) focusNode(ctx, key); else if (input.value.trim()) status(ctx, `找不到「${input.value.trim()}」`);
+    if (key) focusNode(ctx, key); else if (input.value.trim()) status(ctx, t('graph.notFound', { q: input.value.trim() }));
   };
   input.addEventListener('change', search, { signal });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } }, { signal });
@@ -606,7 +607,7 @@ export async function renderGraph(container, { docs = [], projects = {}, site = 
   const libsLoading = loadLibs();
   libsLoading.catch(() => {}); // handled below; avoids an unhandled rejection if disposed first
   const frame = () => new Promise((ok) => requestAnimationFrame(ok));
-  container.innerHTML = '<p class="loading">載入關聯圖…</p>';
+  container.innerHTML = `<p class="loading">${th('graph.loading')}</p>`;
   await frame();
   if (gen !== generation) return;
   const data = buildGraphData(docs, { projects, scope });
@@ -621,12 +622,12 @@ export async function renderGraph(container, { docs = [], projects = {}, site = 
   current = ctx;
   fitHeight(ctx);
   window.addEventListener('resize', () => fitHeight(ctx), { signal: ctx.signal });
-  if (!data.stats.docs) { stage.innerHTML = '<p class="empty">這個範圍沒有文件。</p>'; return; }
-  status(ctx, '載入圖形元件…');
+  if (!data.stats.docs) { stage.innerHTML = `<p class="empty">${th('empty.scope')}</p>`; return; }
+  status(ctx, t('graph.loadingLibs'));
   try {
     ctx.libs = await libsLoading;
   } catch {
-    if (gen === generation) { stage.innerHTML = '<p class="empty">無法載入關聯圖元件（CDN 無法連線）。</p>'; status(ctx, ''); }
+    if (gen === generation) { stage.innerHTML = `<p class="empty">${th('graph.libsFailed')}</p>`; status(ctx, ''); }
     return;
   }
   if (gen !== generation) return; // disposed or re-rendered while loading

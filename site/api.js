@@ -1,5 +1,6 @@
 // Server-mode client: mode detection, JSON API calls and user preferences.
 // Static mode (no /api, or a host that answers /api/me with the SPA's index.html) keeps everything in localStorage.
+import { serverMessage } from './i18n.js';
 
 const PREFS_KEY = 'gitdocs:prefs';
 let ME = null;
@@ -21,7 +22,7 @@ export async function detectMe() {
 export const me = () => ME;
 export const isServer = () => Boolean(ME);
 
-/** JSON request; throws Error(message from `{ error }`) on non-2xx. */
+/** JSON request; throws Error(message from `{ error }`, in the UI language when known) on non-2xx. */
 export async function api(method, path, body) {
   const init = { method, credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } };
   // the server refuses mutating calls without a JSON content type (CSRF guard), even when there is no body
@@ -30,7 +31,7 @@ export async function api(method, path, body) {
   const r = await fetch(path, init);
   let j = null;
   try { j = await r.json(); } catch { /* empty or non-JSON body */ }
-  if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error((j?.error && serverMessage(j.error)) || `HTTP ${r.status}`), { status: r.status });
   return j;
 }
 

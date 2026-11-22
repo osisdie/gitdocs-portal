@@ -1,8 +1,18 @@
 # CI for a content repo on GitHub (copy to .github/workflows/docs.yml). Same checks as templates/gitlab-ci.yml.
 # Deploys stay manual (npm run deploy). In server mode apply D1 migrations before deploying a new engine version:
 #   npx --yes wrangler@4.166.0 d1 migrations apply DB --remote      (npm run db:migrate)
+# External sources (catalog.json → site.sources): `npm run sources:pull` runs before the checks (no-op without
+# sources); pass one secret per source as SOURCE_<NAME>_URL (URL with a read-only token) in `env:` below. Run
+# `npm run sources:pull` before `npm run deploy` too. A source repo can start this workflow with a repository_dispatch
+# event (type: source-updated), e.g. from its own CI with a fine-grained token that has Contents: read & write here:
+#   curl -fsS -X POST -H "Authorization: Bearer $PORTAL_DISPATCH_TOKEN" -H "Accept: application/vnd.github+json" \
+#     https://api.github.com/repos/<owner>/<content-repo>/dispatches -d '{"event_type":"source-updated"}'
 name: docs
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  repository_dispatch:
+    types: [source-updated]
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -12,5 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: bash scripts/engine.sh check
+      - run: node scripts/sources.mjs pull
+        # env:
+        #   SOURCE_ACME_URL: ${{ secrets.SOURCE_ACME_URL }}
       - run: node scripts/build.mjs --check
       - run: node scripts/vault.mjs check

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-gitdocs-portal>
+<html lang="en" data-gitdocs-portal>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,38 +8,45 @@
 <script>
   // Theme before first paint: 'light' / 'dark' pin the tokens; anything else follows prefers-color-scheme (app.css).
   try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* storage blocked */ }
+  // Language before first paint, same order as app.js: stored choice ('gitdocs:lang') → ?lang= → English.
+  (function () {
+    var l = null, m;
+    try { l = localStorage.getItem('gitdocs:lang'); } catch (e) { /* storage blocked */ }
+    if (!l && (m = /[?&]lang=([\w-]+)/.exec(location.search) || /[?&]lang=([\w-]+)/.exec(location.hash))) l = m[1];
+    document.documentElement.lang = /^zh/i.test(l || '') ? 'zh-TW' : 'en';
+  })();
 </script>
 <meta name="theme-color" content="#245c73" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#192126" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="manifest" href="manifest.webmanifest">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <header class="topbar">
   <a class="brand" href="#/home"><span class="logo" aria-hidden="true"></span><span class="brand-name">docs</span></a>
-  <label class="proj"><span class="sr">專案</span><select id="proj" title="專案範圍"></select></label>
-  <button id="nav-btn" class="icon-btn nav-btn" type="button" aria-expanded="false" aria-controls="tabs" aria-label="選單">☰</button>
-  <nav class="tabs" id="tabs" aria-label="主選單">
-    <a href="#/home" data-view="home">首頁</a>
-    <a href="#/list" data-view="list">文件列表</a>
-    <a href="#/summary" data-view="summary">摘要</a>
-    <a href="#/timeline" data-view="timeline">時間軸</a>
-    <a href="#/graph" data-view="graph">關聯圖</a>
+  <label class="proj"><span class="sr" data-i18n="nav.project">Project</span><select id="proj" title="Project scope" data-i18n-attr="title:nav.projectScope"></select></label>
+  <button id="nav-btn" class="icon-btn nav-btn" type="button" aria-expanded="false" aria-controls="tabs" aria-label="Menu" data-i18n-attr="aria-label:nav.menu">☰</button>
+  <nav class="tabs" id="tabs" aria-label="Main menu" data-i18n-attr="aria-label:nav.main">
+    <a href="#/home" data-view="home" data-i18n="nav.home">Home</a>
+    <a href="#/list" data-view="list" data-i18n="nav.list">Documents</a>
+    <a href="#/summary" data-view="summary" data-i18n="nav.summary">Summary</a>
+    <a href="#/timeline" data-view="timeline" data-i18n="nav.timeline">Timeline</a>
+    <a href="#/graph" data-view="graph" data-i18n="nav.graph">Graph</a>
   </nav>
   <div class="search">
-    <label class="grow"><span class="sr">搜尋</span>
-      <input id="q" type="search" placeholder="搜尋…  例：k:API cat:評估 -封存  ( / )" autocomplete="off"></label>
-    <button id="qhelp" class="icon-btn" type="button" aria-expanded="false" aria-controls="helppop" title="搜尋語法">?</button>
+    <label class="grow"><span class="sr" data-i18n="search.label">Search</span>
+      <input id="q" type="search" placeholder="Search…" data-i18n-attr="placeholder:search.placeholder" autocomplete="off"></label>
+    <button id="qhelp" class="icon-btn" type="button" aria-expanded="false" aria-controls="helppop" title="Search syntax" data-i18n-attr="title:search.help">?</button>
     <div id="helppop" class="helppop" hidden></div>
   </div>
   <div class="profile">
-    <button id="me-btn" class="avatar" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="me-menu" title="帳號與設定">訪客</button>
+    <button id="me-btn" class="avatar" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="me-menu" title="Account and settings">Guest</button>
     <div id="me-menu" class="menu" hidden></div>
   </div>
 </header>
 
-<main id="app" tabindex="-1"><p class="loading">載入中…</p></main>
+<main id="app" tabindex="-1"><p class="loading" data-i18n="loading">Loading…</p></main>
 
 <footer class="foot">
   <div class="legends"><div class="legend" id="legend"></div><div class="legend" id="legend-sens"></div></div>

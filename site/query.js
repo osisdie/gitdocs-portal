@@ -8,6 +8,11 @@
 //   dates                 date:2026-11  date>=2026-11-01  date<=2026-11-30  after:2026-11-15  before:2026-11-20
 //   relative dates        after:-30d  date>=-2w  (d / w / m)
 //   sensitivity range     sens>=機密  sens<=內部
+//   English aliases       enum values can also be written as their slug or English label (site/i18n.js ENUMS):
+//                         s:open|in-review|confirmed|published|archived  sens:public|internal|confidential|secret
+//                         sens>=confidential  cat:plan|evaluation|comparison|audit|design-ux|form|api|playbook|…
+
+import { tl, enumValue, enumNames } from './i18n.js';
 
 export const SENSITIVITIES = ['公開', '內部', '機密', '極機密'];
 export const sensRank = (s) => { const i = SENSITIVITIES.indexOf(s); return i < 0 ? 1 : i; };
@@ -24,20 +29,11 @@ const FIELD_ALIASES = {
   date: 'date', before: 'before', after: 'after',
 };
 
-export const QUERY_HELP = [
-  ['api 成本', '多個詞＝全部都要出現（AND）'],
-  ['"release notes"', '引號＝完整片語'],
-  ['-封存', '減號＝排除；也可用在欄位：-status:封存'],
-  ['p:handbook', '專案；p:handbook/onboarding 指定子專案（sub:onboarding 亦可）'],
-  ['cat:評估', '分類（部分比對，cat:UX 可找到「設計／UX」）'],
-  ['s:已發布', '狀態'],
-  ['sens:機密  sens>=機密', '機敏性；可用 >= / <= 比較等級'],
-  ['k:API', '關鍵字或標籤'],
-  ['type:md', '格式 html / md / sh / json'],
-  ['id:14', '編號'],
-  ['date:2026-11', '日期前綴；date>=2026-11-01、date<=…'],
-  ['after:-30d  before:2026-11-20', '之後／之前（含當天）；-30d、-2w、-3m 是相對今天'],
-];
+// Help rows ([example, explanation]) in a UI language; the messages live in the i18n catalogs (qhelp.<n>.k / .v).
+const HELP_ROWS = 12;
+export const queryHelp = (lang = 'en') => Array.from({ length: HELP_ROWS }, (_, i) => [tl(lang, `qhelp.${i + 1}.k`), tl(lang, `qhelp.${i + 1}.v`)]);
+// Kept for the CLI (scripts/doc.mjs prints it under its Chinese usage text).
+export const QUERY_HELP = queryHelp('zh-TW');
 
 function resolveDate(v, today = new Date()) {
   const m = /^-(\d+)([dwm])$/.exec(v);
@@ -82,11 +78,14 @@ function fieldMatch(doc, f) {
     case 'project':
       return v.includes('/') ? lc(`${doc.project}/${doc.subproject || ''}`) === v : lc(doc.project) === v;
     case 'sub': return lc(doc.subproject) === v;
-    case 'cat': return lc(doc.category).includes(v);
-    case 'status': return lc(doc.status).includes(v);
-    case 'sens':
-      if (f.op === ':') return doc.sensitivity === f.value;
-      return SENSITIVITIES.includes(f.value) && cmp(sensRank(doc.sensitivity), f.op, sensRank(f.value));
+    // partial match against the stored value, its slug and its English label (cat:UX, cat:eval, s:review)
+    case 'cat': return enumNames('cat', doc.category).some((n) => n.includes(v));
+    case 'status': return enumNames('status', doc.status).some((n) => n.includes(v));
+    case 'sens': {
+      const want = enumValue('sens', f.value) || f.value;
+      if (f.op === ':') return doc.sensitivity === want;
+      return SENSITIVITIES.includes(want) && cmp(sensRank(doc.sensitivity), f.op, sensRank(want));
+    }
     case 'tag': return [...(doc.tags || []), ...(doc.keywords || [])].some((t) => lc(t) === v);
     case 'type': return lc(doc.type) === v;
     case 'id': return Number(doc.id) === Number(f.value.replace(/^#/, ''));

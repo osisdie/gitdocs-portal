@@ -3,7 +3,7 @@
 // Secrets live encrypted in <content>/vault/vault.json (safe to commit); documents keep only {{vault:<name>}}.
 import fs from 'node:fs';
 import path from 'node:path';
-import { CONTENT, DOCS, VAULT_FILE, walk } from './lib/catalog.mjs';
+import { CONTENT, DOCS, VAULT_FILE, SOURCES_DIR, SCAN_MAX_BYTES, walk, loadCatalog, mountsOf, mountedDocs, vaultRefAllowed, tenantVaultFile } from './lib/catalog.mjs';
 import { NAME_RE, VAULT_RE, refsIn, createVault, deriveKey, exportKey, rekeyVault, seal, unseal, verifyKey } from '../site/vault-core.js';
 
 
@@ -22,6 +22,10 @@ const USAGE = `用法：npm run vault -- <指令>
   scan [--fix] [檔案…]               找文件裡的明文憑證；--fix 收進 vault 並改寫成 {{vault:…}}
   postman <檔案> [--prefix=名稱]     Postman environment／collection：secret 型別或像憑證的變數收進 vault
 
+外部來源（租戶）自己的 vault：在 gitdocs-portal 裡執行
+  CONTENT_DIR=../acme-docs node scripts/vault.mjs init / set acme/… [--namespace=acme]
+名稱都要以 <來源名稱>/ 開頭；把 key 的輸出安全地交給管理者設成 Pages secret VAULT_KEY_<來源名稱>。
+
 文件引用語法：{{vault:<name>}}，name 可用 A-Z a-z 0-9 _ . / -（例如 aws/prod/access-key）。
 入口網站顯示成 •••••••• ，按「顯示」輸入密語才在瀏覽器端解密；明文不會進 git、dist、搜尋索引。`;
 
@@ -30,7 +34,7 @@ const flags = Object.fromEntries(rawArgs.filter((a) => a.startsWith('--')).map((
 const args = rawArgs.filter((a) => !a.startsWith('--'));
 const die = (msg) => { console.error(msg); process.exit(1); };
 const today = () => new Date().toISOString().slice(0, 10);
-const rel = (abs) => path.relative(CONTENT, abs).split(path.sep).join('/');
+const rel = (abs) => mountedRel.get(abs) || path.relative(CONTENT, abs).split(path.sep).join('/');
 
 // ---------- env / prompts ----------
 function loadDotEnv() {
@@ -38,8 +42,9 @@ function loadDotEnv() {
     const f = path.join(dir, '.env');
     if (!fs.existsSync(f)) continue;
     for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-      if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
+      // (.*) then trim: a lazy (.*?) before \s*$ is quadratic on a long run of blanks
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=(.*)$/);
+      if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
     }
   }
 }
@@ -91,9 +96,37 @@ async function unlock(v) {
   return key;
 }
 const needName = (n) => { if (!n || !NAME_RE.test(n)) die(`secret 名稱只能用 A-Z a-z 0-9 _ . / -：${n ?? '(未提供)'}`); return n; };
+/**
+ * Namespace of this vault when it can tell: --namespace= / $VAULT_NAMESPACE, else the first segment every existing
+ * name shares. A tenant's vault (a source repo) is only read for names under `<source>/`.
+ */
+function namespaceHint(v) {
+  const given = flags.namespace || process.env.VAULT_NAMESPACE;
+  if (typeof given === 'string' && given) return given.replace(/\/+$/, '');
+  const names = Object.keys(v.secrets);
+  const firsts = new Set(names.map((n) => (n.includes('/') ? n.split('/')[0] : '')));
+  return names.length && firsts.size === 1 && !firsts.has('') ? [...firsts][0] : null;
+}
 
 // ---------- references in docs ----------
-const docFiles = () => (fs.existsSync(DOCS) ? walk(DOCS, { notes: true }) : []); // notes too: they may quote credentials
+// Mounted source files (.sources/<name>/…, see npm run sources:pull) are read too, under their catalog path. They
+// are read-only here: the source repo owns them, so nothing in this CLI rewrites them.
+let mounted = [], mounts = [];
+try { mounts = mountsOf(loadCatalog().site); mounted = mountedDocs(mounts); } catch (e) { console.error(`⚠ sources: ${e.message}`); }
+/** Secret names in a mounted source's own vault (vault/vault.json in the source repo), read-only. */
+const tenantNames = new Map(mounts.map((m) => {
+  const f = tenantVaultFile(m);
+  let names = [];
+  try { names = f ? Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).secrets || {}) : []; } catch { /* reported by the build */ }
+  return [m.name, new Set(names.filter((n) => n.startsWith(`${m.name}/`)))];
+}));
+const mountedRel = new Map(mounted.map((f) => [f.abs, f.rel]));
+const mountedSource = new Map(mounted.map((f) => [f.abs, f.source]));
+const SOURCES_ROOT = SOURCES_DIR;
+const isInside = (f, dir) => { const r = path.relative(dir, path.resolve(f)); return r && !r.startsWith('..') && !path.isAbsolute(r); };
+const isMounted = (abs) => mountedSource.has(abs);
+const localDocFiles = () => (fs.existsSync(DOCS) ? walk(DOCS, { notes: true }) : []); // notes too: they may quote credentials
+const docFiles = () => [...localDocFiles(), ...mounted.map((f) => f.abs)];
 function references() {
   const map = new Map(); // name → [rel…]
   for (const f of docFiles()) for (const n of refsIn(fs.readFileSync(f, 'utf8'))) map.set(n, [...(map.get(n) || []), rel(f)]);
@@ -101,9 +134,10 @@ function references() {
 }
 
 // ---------- plaintext detection (values are captured so they can be sealed) ----------
+// Checked in this order; a later pattern's hit that overlaps an earlier accepted one is dropped.
 const SEAL_PATTERNS = [
   ['credential', /\b(api[_-]?key|secret|access[_-]?token|auth[_-]?token|passw(?:or)?d|private[_-]?key|client[_-]?secret)\b(["']?\s*[:=]\s*["']?)([A-Za-z0-9_\-/+.=]{16,})/gi, 3],
-  ['private-key', /-----BEGIN ([A-Z ]*)PRIVATE KEY-----[\s\S]+?-----END \1PRIVATE KEY-----/g, 0],
+  ['private-key', privateKeyBlocks, 0],
   ['openai-key', /\bsk-[A-Za-z0-9_-]{20,}/g, 0],
   ['aws-access-key', /\bAKIA[0-9A-Z]{16}\b/g, 0],
   ['github-token', /\bgh[pousr]_[A-Za-z0-9]{30,}/g, 0],
@@ -111,19 +145,67 @@ const SEAL_PATTERNS = [
   ['slack-token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/g, 0],
   ['google-api-key', /\bAIza[0-9A-Za-z_-]{35}\b/g, 0],
 ];
+
+/**
+ * `-----BEGIN <L>PRIVATE KEY----- … -----END <L>PRIVATE KEY-----` blocks as match-like objects, exactly what
+ * /-----BEGIN ([A-Z ]*)PRIVATE KEY-----[\s\S]+?-----END \1PRIVATE KEY-----/g finds, in linear time: that regex
+ * rescans to the end of the file for every opener without its END. Here one pass lists every END position per label
+ * (each '-----END ' has exactly one possible label), and each opener takes the first END of its label after it
+ * through a per-label pointer that only moves forward.
+ */
+function* privateKeyBlocks(text) {
+  const ends = new Map(); // label → { at: [positions ascending], i: pointer }
+  const endRe = /-----END ([A-Z ]*)PRIVATE KEY-----/g;
+  for (let m; (m = endRe.exec(text)); endRe.lastIndex = m.index + 1) { // +1: an END may start inside the previous one's dashes
+    if (!ends.has(m[1])) ends.set(m[1], { at: [], i: 0 });
+    ends.get(m[1]).at.push(m.index);
+  }
+  const open = /-----BEGIN ([A-Z ]*)PRIVATE KEY-----/g;
+  let m;
+  while ((m = open.exec(text))) {
+    const e = ends.get(m[1]);
+    const from = open.lastIndex + 1; // at least one character between, like [\s\S]+?
+    if (e) while (e.i < e.at.length && e.at[e.i] < from) e.i++;
+    if (!e || e.i >= e.at.length) { open.lastIndex = m.index + 1; continue; } // the regex retries the next position
+    open.lastIndex = e.at[e.i] + `-----END ${m[1]}PRIVATE KEY-----`.length;
+    yield { 0: text.slice(m.index, open.lastIndex), index: m.index };
+  }
+}
+
 /** [{ kind, value, index, label }] — non-overlapping, in file order. */
 function findPlaintext(text) {
-  const hits = [];
+  let accepted = []; // sorted by index, non-overlapping
   for (const [kind, re, group] of SEAL_PATTERNS) {
-    for (const m of text.matchAll(re)) {
+    const found = [];
+    for (const m of typeof re === 'function' ? re(text) : text.matchAll(re)) {
       const value = m[group];
       const index = m.index + (group ? m[0].lastIndexOf(value) : 0);
-      if (hits.some((h) => index < h.index + h.value.length && h.index < index + value.length)) continue;
-      hits.push({ kind, value, index, label: group ? m[1].toLowerCase().replace(/[_]/g, '-') : kind });
+      found.push({ kind, value, index, label: group ? m[1].toLowerCase().replace(/[_]/g, '-') : kind });
     }
+    // one pattern's matches come in file order: drop those overlapping an accepted hit with a moving pointer
+    // (comparing every pair is quadratic in the number of hits), then merge the two sorted lists
+    const keep = [];
+    let j = 0;
+    for (const h of found) {
+      while (j < accepted.length && accepted[j].index + accepted[j].value.length <= h.index) j++;
+      if (j < accepted.length && accepted[j].index < h.index + h.value.length) continue;
+      keep.push(h);
+    }
+    const merged = [];
+    let a = 0, b = 0;
+    while (a < accepted.length || b < keep.length) {
+      merged.push(b >= keep.length || (a < accepted.length && accepted[a].index <= keep[b].index) ? accepted[a++] : keep[b++]);
+    }
+    accepted = merged;
   }
-  return hits.sort((a, b) => a.index - b.index);
+  return accepted;
 }
+
+/** Text of a mounted source file for detection: its first SCAN_MAX_BYTES (findings there are warnings only). */
+const scanText = (abs) => {
+  const buf = fs.readFileSync(abs);
+  return (buf.length > SCAN_MAX_BYTES ? buf.subarray(0, SCAN_MAX_BYTES) : buf).toString('utf8');
+};
 const slugOf = (f) => path.basename(f).replace(/\.[^.]+$/, '').replace(/\.postman_(collection|environment)$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/[^A-Za-z0-9_.-]+/g, '-').toLowerCase() || 'doc';
 const mask = (s) => (s.length <= 8 ? '••••' : `${s.slice(0, 4)}…${s.slice(-2)}`);
 
@@ -183,6 +265,8 @@ switch (cmd) {
   case 'set': {
     const name = needName(args[0]);
     const v = needVault();
+    const ns = namespaceHint(v);
+    if (ns && !name.startsWith(`${ns}/`)) console.error(`⚠ ${name} 不在這個 vault 的命名空間 ${ns}/ 之下：外部來源的 vault 只會用到 ${ns}/… 的名稱（用 --namespace= 指定）`);
     const key = await unlock(v);
     const value = process.stdin.isTTY ? await promptHidden(`${name} 的值：`) : await readStdin();
     if (!value) die('值是空的。');
@@ -222,7 +306,9 @@ switch (cmd) {
     for (const f of docFiles()) {
       const t = fs.readFileSync(f, 'utf8');
       const n = t.replace(VAULT_RE, (m, name) => (name === from ? `{{vault:${to}}}` : m));
-      if (n !== t) { fs.writeFileSync(f, n); files++; }
+      if (n === t) continue;
+      if (isMounted(f)) { console.error(`⚠ ${rel(f)} 來自外部來源 ${mountedSource.get(f)}（唯讀）：請在來源 repo 把 {{vault:${from}}} 改成 {{vault:${to}}}`); continue; }
+      fs.writeFileSync(f, n); files++;
     }
     console.log(`${from} → ${to}；改寫 ${files} 份文件。`);
     break;
@@ -249,30 +335,47 @@ switch (cmd) {
     break;
   }
   case 'check': {
+    // Problems in mounted source files are warnings, not failures: a source writer must not be able to block the
+    // host's pipeline, and the build already keeps them safe (極機密 files are not deployed, foreign refs stripped).
     const v = loadVault();
-    const refs = references();
+    const localRefs = new Map(), warnings = [];
+    for (const f of localDocFiles()) for (const n of refsIn(fs.readFileSync(f, 'utf8'))) localRefs.set(n, [...(localRefs.get(n) || []), rel(f)]);
+    for (const f of mounted) {
+      for (const n of refsIn(fs.readFileSync(f.abs, 'utf8'))) {
+        if (!vaultRefAllowed(f.source, n)) warnings.push(`⚠ ${f.rel}（來源 ${f.source}）引用 {{vault:${n}}}，不在 ${f.source}/ 之下：build 會擋掉`);
+        else if (!v?.secrets[n] && !tenantNames.get(f.source)?.has(n)) warnings.push(`⚠ ${f.rel}（來源 ${f.source}）引用的 secret「${n}」不在 host 或來源的 vault（若在網頁 vault 裡則沒問題）`);
+      }
+      for (const h of findPlaintext(scanText(f.abs))) warnings.push(`⚠ 明文憑證 ${h.kind} ${mask(h.value)}：${f.rel}（來源 ${f.source}，請在來源 repo 修正）`);
+    }
+    for (const w of warnings) console.error(w);
+    const refs = localRefs;
     const missing = [...refs.keys()].filter((n) => !v?.secrets[n]);
     for (const n of missing) console.error(`✗ 缺少 secret「${n}」：${refs.get(n).join(', ')}`);
     let leaks = 0;
-    for (const f of docFiles()) for (const h of findPlaintext(fs.readFileSync(f, 'utf8'))) { leaks++; console.error(`✗ 明文憑證 ${h.kind} ${mask(h.value)}：${rel(f)}`); }
+    for (const f of localDocFiles()) for (const h of findPlaintext(fs.readFileSync(f, 'utf8'))) { leaks++; console.error(`✗ 明文憑證 ${h.kind} ${mask(h.value)}：${rel(f)}`); }
     if (v && process.env.VAULT_PASSPHRASE) {
       const key = await unlock(v);
       for (const [n, box] of Object.entries(v.secrets)) await unseal(key, n, box).catch(() => die(`✗ 無法解開 ${n}（密文損壞或被搬動）`));
       console.log(`✓ 密語正確，${Object.keys(v.secrets).length} 筆都能解開`);
     }
     if (missing.length || leaks) die(`check 失敗：缺少 ${missing.length}、明文 ${leaks}（npm run vault -- scan --fix 可收進 vault）`);
-    console.log(`✓ ${refs.size} 個引用都存在${v ? `，vault 共 ${Object.keys(v.secrets).length} 筆` : ''}；沒有偵測到明文憑證`);
+    console.log(`✓ ${refs.size} 個引用都存在${v ? `，vault 共 ${Object.keys(v.secrets).length} 筆` : ''}；沒有偵測到明文憑證${mounted.length ? `（外部來源 ${mounted.length} 份文件，${warnings.length} 個警告）` : ''}`);
     break;
   }
   case 'scan': {
     const files = args.length ? args.map((a) => path.resolve(a)).flatMap((a) => (fs.statSync(a).isDirectory() ? walk(a) : [a])) : docFiles();
-    const found = files.map((f) => ({ f, hits: findPlaintext(fs.readFileSync(f, 'utf8')) })).filter((x) => x.hits.length);
+    // mounted files are read-only here (never rewritten), so only their first SCAN_MAX_BYTES are scanned
+    const found = files.map((f) => ({ f, hits: findPlaintext(isMounted(f) || isInside(f, SOURCES_ROOT) ? scanText(f) : fs.readFileSync(f, 'utf8')) })).filter((x) => x.hits.length);
     if (!found.length) { console.log('沒有偵測到明文憑證。'); break; }
     for (const { f, hits } of found) for (const h of hits) console.log(`${rel(f)}  ${h.kind.padEnd(16)} ${mask(h.value)}`);
     if (!flags.fix) { console.log(`\n共 ${found.reduce((n, x) => n + x.hits.length, 0)} 處。加 --fix 收進 vault 並改寫成 {{vault:…}}。`); break; }
+    const refused = found.filter(({ f }) => isMounted(f) || isInside(f, SOURCES_ROOT));
+    for (const { f } of refused) console.error(`✗ 不修改 ${rel(f)}：外部來源的檔案是唯讀的，請在來源 repo 修正（secret 名稱用 ${mountedSource.get(f) || '<來源>'}/…）`);
+    const fixable = found.filter((x) => !refused.includes(x));
+    if (!fixable.length) die('沒有可以修改的檔案。');
     const v = needVault();
     const put = await sealer(v, await unlock(v));
-    for (const { f, hits } of found) {
+    for (const { f, hits } of fixable) {
       let text = fs.readFileSync(f, 'utf8');
       for (const h of [...hits].reverse()) { // right-to-left keeps earlier indexes valid
         const dir = path.relative(DOCS, path.dirname(f)).split(path.sep).filter((x) => x && x !== '..').join('/');
@@ -283,11 +386,13 @@ switch (cmd) {
       console.log(`✓ ${rel(f)}：${hits.length} 處改成 vault 引用`);
     }
     saveVault(v);
+    if (refused.length) process.exitCode = 1;
     break;
   }
   case 'postman': {
     if (!args[0]) die('用法：npm run vault -- postman <檔案> [--prefix=名稱]');
     const file = path.resolve(args[0]);
+    if (isInside(file, SOURCES_ROOT)) die(`${rel(file)} 來自外部來源（唯讀），請在來源 repo 處理`);
     const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
     const prefix = `postman/${flags.prefix || slugOf(file)}`;
     const pairs = postmanPairs(doc).filter((p) => p.value && !/\{\{\s*vault:/.test(p.value) && (p.type === 'secret' || POSTMAN_SECRET_KEY.test(p.key)));

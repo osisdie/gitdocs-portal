@@ -17,7 +17,9 @@
     "engine:update": "bash scripts/engine.sh update",
     "engine:check": "bash scripts/engine.sh check",
     "test": "node --test test/*.test.mjs",
+    "screenshots": "node tools/screenshots/capture.mjs",
     "state:pull": "node scripts/state-pull.mjs",
+    "sources:pull": "node scripts/sources.mjs pull",
     "db:migrate": "npx --yes wrangler@4.166.0 d1 migrations apply DB --remote"
   }
 }

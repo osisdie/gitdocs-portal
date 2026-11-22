@@ -10,13 +10,18 @@ versioned. The output is a static site; the reference deployment is Cloudflare P
 ## Contents
 
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Quick start](#quick-start)
 - [Engine repo vs. content repo](#engine-repo-vs-content-repo)
 - [Vault: masked credentials](#vault-masked-credentials)
 - [Sensitivity levels](#sensitivity-levels)
 - [Catalog CLI and search syntax](#catalog-cli-and-search-syntax)
+- [Interface language](#interface-language)
 - [Deploying](#deploying)
 - [Server mode (multi-user)](#server-mode-multi-user)
+  - [Public projects](#public-projects)
+  - [Confidential documents](#confidential-documents)
+- [External content sources](#external-content-sources)
 - [Contributing](#contributing)
 
 ## Features
@@ -39,6 +44,44 @@ versioned. The output is a static site; the reference deployment is Cloudflare P
 - **Server mode** (optional): Pages Functions + D1 behind Cloudflare Access — per-project roles, web edits and notes,
   a server-side vault with an audit log. See [Server mode](#server-mode-multi-user).
 - No framework, no runtime dependencies. Node ≥ 20 for the build, Node ≥ 22 for `npm test`.
+
+## Screenshots
+
+**Home — what needs you, at a glance**
+
+![Home](assets/screenshots/01-home.png)
+
+**Search and filter — full text, query language, keyword chips**
+
+![Search and filter](assets/screenshots/02-list.png)
+
+**Document page — the content first, metadata and workflow beside it**
+
+![Document page](assets/screenshots/03-doc.png)
+
+**Vault reveal — role-checked, decrypted by the server, audited**
+
+![Vault reveal](assets/screenshots/04-vault-reveal.png)
+
+**Project vault — managers add, replace and reveal secrets per project**
+
+![Project vault](assets/screenshots/05-project-vault.png)
+
+**Knowledge graph — documents, projects and shared keywords**
+
+![Knowledge graph](assets/screenshots/08-graph.png)
+
+**Admin — per-project roles and invitations**
+
+![Admin users](assets/screenshots/09-admin-users.png)
+
+**Mobile — document page, content first**
+
+![Mobile document page](assets/screenshots/14-mobile-doc.png)
+
+All 15 screenshots (summary, timeline, dark theme, profile menu, admin projects, zh-TW, …): [assets/screenshots/](assets/screenshots/README.md).
+Regenerate with `npm run screenshots` — demo content from `examples/`, a mocked server-mode API, headless Chromium via a
+pinned `playwright-core`; no server is started. `-- --plain` writes a set without highlights.
 
 ## Quick start
 
@@ -140,6 +183,31 @@ npm run doc -- filter add 'This week' 'after:-7d'
 Search: `api 成本` (AND) · `"release notes"` · `-封存` · `p:handbook/onboarding` · `cat:評估` · `s:已發布` ·
 `sens>=機密` · `k:API` · `type:json` · `id:14` · `date:2026-11` · `after:-30d` · `before:2026-11-20`.
 
+Status, sensitivity and category values can also be written in English (the slug or the English label):
+`s:open|in-review|confirmed|published|archived`, `sens:public|internal|confidential|secret`, `sens>=confidential`,
+`cat:plan|evaluation|comparison|audit|design-ux|form|api|playbook|script-copy|shell-script|index|report`.
+`s:published sens>=confidential` matches exactly what `s:已發布 sens>=機密` matches.
+
+## Interface language
+
+The portal UI is in **English** by default; **繁體中文** (zh-TW) is built in.
+
+- **Switch:** profile menu (top right) → *Language*. The page re-renders in place (no reload). The choice is saved
+  per user (server mode: `prefs.lang`; static mode: `localStorage` key `gitdocs:lang`).
+- **Link to a language:** add `?lang=zh-TW` (or `?lang=en`) to the URL, e.g. `https://docs.example.com/?lang=zh-TW#/list`.
+  It applies only when the viewer has not picked a language in the menu, and it is not saved. Useful for screenshots
+  and shared links.
+- **Data stays as stored.** Statuses, sensitivity levels, default categories and the index project are stored in
+  Chinese (`待處理`, `機密`, `評估`, `（索引）`, …) in `catalog.json` and D1; the UI only *displays* them through label
+  maps (Open, Confidential, Evaluation, (Index), …). Custom values you add are shown as written.
+- **Add a locale:** copy `site/i18n/en.js` to `site/i18n/<tag>.js` and translate every value (keep the keys and the
+  `{placeholders}`; plural messages are `{ one, other }` objects chosen by `Intl.PluralRules`). Then in
+  `site/i18n.js` import it, add it to `CATALOGS` and `LANGS`, and teach `normLang()` the tag; add the file to
+  `SHELL_FILES` in `functions/_lib/gate.js` (the server's allowlist; a test fails
+  until it matches `site/`). Labels of stored values are the `status.*`, `sens.*`, `cat.*` and `project.*` keys.
+  `site/vault-frame.js` (inlined into sandboxed HTML docs) carries its few strings inline and follows the document's
+  own `<html lang>`.
+
 ## Deploying
 
 `npm run deploy` builds and uploads `dist/` with Wrangler (direct upload, so `極機密` files never reach a
@@ -203,6 +271,25 @@ Roles are per top-level project (`*` = every project). Owners come from `OWNER_E
 6. **Local development**: run `npx --yes wrangler@4.166.0 pages dev dist --ip 127.0.0.1` (bound to 127.0.0.1, never
    `0.0.0.0`), with `DEV_USER_EMAIL` in `.dev.vars`.
 
+### Public projects
+
+Like MantisBT's "View Status: public": `npm run doc -- project <name> visibility=public` (top-level projects only;
+`visibility=private` is the default) makes a project visible to **every signed-in user** as a viewer — its documents,
+search results and notes (read and add). Changing status / people / tags, revealing vault fields and managing members
+still need a membership in the project. Subprojects follow their top-level project; the index project `（索引）` can
+never be public. `GET /api/me` lists them in `publicProjects`; every `projects` entry in the built `catalog.json` carries
+its effective `visibility`. Static mode is unaffected. With the Access group sync on, only users with at least one
+membership pass Access, so give the other organisation's people a membership of their own project (or another Access
+rule).
+
+### Confidential documents
+
+In server mode a `機密` (confidential) or higher document is readable only by **editors and above** of its project:
+viewers and public-project visitors see its title and metadata (`restricted: true`) but `/docs/…` answers 403. Any
+document can declare a minimum sensitivity itself — Markdown front matter `sensitivity: confidential` or HTML
+`<meta name="sensitivity" content="confidential">` (`public` / `internal` / `confidential` / `secret` or the Chinese
+names). A declaration only raises the level, and it holds even after review: lower it by editing the file.
+
 ### State back to git
 
 Web edits live in D1. `npm run state:pull` (owner, local; uses `wrangler d1 execute --remote`) writes changed
@@ -227,6 +314,50 @@ The database name comes from `wrangler.toml`, `$D1_DATABASE` or `--db=<name>`.
   decrypted or audited until the user clicks 顯示 / 複製 in that dialog.
 - `VAULT_KEY` opens every secret in `vault/vault.json` (which is in git): treat it like the passphrase.
 - Share builds (`--max-sensitivity`) also drop reporter / assignee / reviewer emails. `docs/notes/` is never deployed.
+
+## External content sources
+
+A second organisation can publish into the same portal from **its own git repo** — it pushes there, never to your
+content repo — and appear as one top-level project. Declare the source in `docs/catalog.json`:
+
+```json
+"site": { "sources": [{ "name": "acme", "repo": "https://git.example.com/acme/docs.git", "ref": "main", "path": "docs" }] }
+```
+
+```bash
+npm run sources:pull     # fetch/update every source into .sources/<name>/ (gitignored; add ".sources/" to your .gitignore)
+npm run build            # .sources/acme/docs/** is mounted as docs/acme/** — ids and metadata stay in your catalog.json
+```
+
+- `name` is the project key (`[a-z0-9-]`, must not clash with a local folder), `path` the folder inside the source repo
+  (default: its root), `ref` a branch / tag / commit. Subfolders become subprojects; history and reporter come from the
+  source repo; records get `source: "acme"`.
+- **Credentials** never go into `catalog.json`: use your git credential helper / SSH agent, or in CI a masked variable
+  `SOURCE_ACME_URL` (e.g. a read-only GitLab deploy token in the URL's userinfo, `https://deploy:<token>@…`) that
+  overrides `repo`. The URL is not written to `.sources/` and is masked in error messages; a URL with a query string
+  or fragment (`?private_token=…`) is refused.
+- **What the source repo can and cannot do**: it controls file contents only. Symlinks and dot-files are skipped, the
+  mount cannot escape its folder, metadata / visibility / memberships stay in your repo and D1, and its documents may
+  only use vault names under `acme/` (secrets you seal in your vault): other `{{vault:…}}` references are blocked by the
+  build and refused by `/api/vault/reveal`. Sensitivity rules apply (`極機密` files are not deployed); `npm run vault --
+  check` / `scan` report problems in mounted files as warnings and never modify them.
+- **Not checked out** (no credentials, failed pull): the build warns and leaves that source's documents out of the
+  deployment, but keeps their catalog entries (ids, workflow state) until a successful pull shows a file is gone. A
+  failed `sources:pull` exits 1, so CI does not deploy a site with the source missing.
+- **Its own secrets** (three places, looked up in this order — details in [DESIGN.md](DESIGN.md#tenant-vaults)):
+  1. *Web vault*: managers of the `acme` project add / replace / delete `acme/…` secrets in the portal (stored
+     encrypted in D1 with `VAULT_KEY`, with a version history; values never appear in logs or history).
+  2. *The source repo's own vault*: the tenant clones gitdocs-portal and runs
+     `CONTENT_DIR=../acme-docs node scripts/vault.mjs init` and `… set acme/smtp/password`, commits
+     `acme-docs/vault/vault.json` (their own passphrase), and sends you `node scripts/vault.mjs key` once over a secure
+     channel; you store it with `npx --yes wrangler@4.166.0 pages secret put VAULT_KEY_ACME --project-name <project>`.
+     A server-mode build (`wrangler.toml` with a D1 binding, or `--server`) deploys that file (only its `acme/…`
+     names) where it is never served; a static build leaves it out.
+     Web-vault managers cannot replace a secret that lives here or in your host vault (409); an owner can, and it is
+     recorded.
+  3. *Your host vault*: secrets you seal under `acme/…` yourself.
+- **Redeploy on push**: the CI templates pull sources before building; `templates/gitlab-ci.yml` shows the pipeline
+  trigger a source repo calls so its pushes redeploy the portal (GitHub: `repository_dispatch`). Details: [DESIGN.md](DESIGN.md#external-content-sources).
 
 ## Contributing
 

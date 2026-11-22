@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Catalog management CLI.  npm run doc -- <command> …
-import { loadCatalog, saveCatalog, syncCatalog, toRecord, findById, README_FIELDS, SENSITIVITIES, PEOPLE_FIELDS } from './lib/catalog.mjs';
+import { loadCatalog, saveCatalog, syncCatalog, toRecord, findById, README_FIELDS, SENSITIVITIES, PEOPLE_FIELDS, INDEX_PROJECT, VISIBILITIES, aliasProblem } from './lib/catalog.mjs';
 import { parseQuery, matchDoc, QUERY_HELP } from '../site/query.js';
 
 const USAGE = `用法：npm run doc -- <指令>
@@ -17,6 +17,8 @@ const USAGE = `用法：npm run doc -- <指令>
   supersede <new> <old>             <new> 取代 <old>（加 --archive 把舊的狀態改成「封存」）
   lock <id> / unlock <id>           鎖定後 README 索引不再覆蓋 title/desc/url/date
   project <name> key=value …        改專案註冊表：title desc（子專案用 handbook/onboarding）
+                                    visibility=public|private（只限頂層專案；public＝所有已開通的使用者
+                                    都能以 viewer 檢視與留言；子專案跟著頂層；（索引）不能 public）
   kw ls | kw add <關鍵字> <regex…> | kw rm <關鍵字>
   filter ls | filter add <名稱> <查詢> | filter rm <名稱>
 
@@ -36,7 +38,8 @@ const fit = (s, w) => {
 
 function load() {
   const c = loadCatalog();
-  const sync = syncCatalog(c);
+  let sync;
+  try { sync = syncCatalog(c); } catch (e) { die(e.message); }
   return { c, ...sync };
 }
 function need(c, id) {
@@ -145,8 +148,19 @@ switch (cmd) {
   }
   case 'project': {
     const { c } = load();
-    const p = c.projects[args[0]] || die(`沒有專案「${args[0]}」。現有：${Object.keys(c.projects).join(', ')}`);
-    for (const [k, v] of kv(args.slice(1))) { if (!['title', 'desc'].includes(k)) die('專案只能改 title / desc'); p[k] = v; }
+    const name = args[0];
+    const p = (name && Object.hasOwn(c.projects, name) && c.projects[name]) || die(`沒有專案「${name}」。現有：${Object.keys(c.projects).join(', ')}`);
+    for (const [k, v] of kv(args.slice(1))) {
+      if (k === 'visibility') {
+        if (!VISIBILITIES.includes(v)) die(`visibility 必須是：${VISIBILITIES.join(' / ')}`);
+        if (name.includes('/') || p.parent) die('visibility 只能設在頂層專案（子專案跟著頂層專案）');
+        if (name === INDEX_PROJECT && v === 'public') die(`${INDEX_PROJECT} 不能設為 public`);
+        if (v === 'public') p.visibility = 'public'; else delete p.visibility; // private is the default
+        continue;
+      }
+      if (!['title', 'desc'].includes(k)) die('專案只能改 title / desc / visibility');
+      p[k] = v;
+    }
     saveCatalog(c);
     console.log(`專案 ${args[0]} 已更新`);
     break;
@@ -156,7 +170,7 @@ switch (cmd) {
     const [sub, name, ...res] = args;
     if (sub === 'add') {
       if (!name || !res.length) die('kw add <關鍵字> <regex…>');
-      for (const r of res) { try { new RegExp(r, 'i'); } catch (e) { die(`regex 無效：${r} (${e.message})`); } }
+      for (const r of res) { const why = aliasProblem(r); if (why) die(`regex 不接受：${r} (${why})`); }
       c.keywords[name] = [...new Set([...(c.keywords[name] || []), ...res])];
     } else if (sub === 'rm') {
       if (!c.keywords[name]) die(`沒有關鍵字「${name}」`);
