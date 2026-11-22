@@ -84,14 +84,10 @@ export default {
   'home.sec.sens': '機敏性待複核',
 
   // ---------- 文件列表 ----------
-  'list.any': '（全部）',
-  'list.addAnother': '再加一個…',
   'list.savedFilters': '儲存的篩選',
   'list.filtersLabel': '篩選：',
   'list.deleteFilter': '刪除「{name}」',
   'list.saveFilter': '＋ 儲存目前篩選',
-  'list.filters': '篩選',
-  'list.kwTag': '關鍵字／標籤',
   'list.sort': '排序',
   'list.remove': '移除',
   'list.showing': '顯示 <b>{shown}</b> / {n} 份文件',

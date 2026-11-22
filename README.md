@@ -303,8 +303,9 @@ names). A declaration only raises the level, and it holds even after review: low
 ### State back to git
 
 Web edits live in D1. `npm run state:pull` (owner, local; uses `wrangler d1 execute --remote`) writes changed
-status / assignee / reviewer / tags into `docs/catalog.json`, appends notes to `docs/notes/<id>.md`, marks what it
-exported in the `synced` table and prints a commit message. `--dry-run` shows the changes without writing anything.
+status / assignee / reviewer / tags into `docs/catalog.json`, appends notes to `docs/notes/<id>.md`, snapshots the
+project-shared filters into `docs/notes/shared-filters.json`, marks what it exported in the `synced` table and prints
+a commit message. `--dry-run` shows the changes without writing anything.
 The database name comes from `wrangler.toml`, `$D1_DATABASE` or `--db=<name>`.
 
 ### Security notes

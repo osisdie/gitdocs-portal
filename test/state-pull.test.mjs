@@ -8,7 +8,7 @@ import path from 'node:path';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitdocs-state-'));
 fs.mkdirSync(path.join(dir, 'docs'));
 process.env.CONTENT_DIR = dir;
-const { dbNameFromToml, applyExport, markSql, commitMessage, noteMarker } = await import('../scripts/state-pull.mjs');
+const { dbNameFromToml, applyExport, markSql, commitMessage, noteMarker, sharedFiltersJson, sharedFile } = await import('../scripts/state-pull.mjs');
 
 test('database_name comes from the [[d1_databases]] entry bound as DB', () => {
   const toml = `name = "docs"\npages_build_output_dir = "dist"\n\n[[d1_databases]]\nbinding = "OTHER"\ndatabase_name = "x"\n\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "gitdocs"\ndatabase_id = "0000"\n`;
@@ -90,4 +90,18 @@ test('the pull queries and the synced upsert run against the migrated schema', a
   assert.equal(db.prepare('SELECT at FROM synced').get().at, '2026-11-20T01:00:00.000Z');
   assert.equal(db.prepare(DOCS_SQL).all().length, 0);
   assert.equal(db.prepare(NOTES_SQL).all().length, 0);
+});
+
+test('shared filters snapshot: sorted, without D1 ids, under docs/notes (never scanned or deployed)', () => {
+  const text = sharedFiltersJson([
+    { id: 9, project: 'beta', name: 'b', params: 'p=beta', created_by: 'm@x', created_at: '2026-11-02' },
+    { id: 3, project: 'alpha', name: 'z', params: 'p=alpha&q=x', created_by: 'm@x', created_at: '2026-11-01' },
+    { id: 4, project: 'alpha', name: 'a', params: 'p=alpha', created_by: 'o@x', created_at: '2026-11-03' },
+  ]);
+  const rows = JSON.parse(text);
+  assert.deepEqual(rows.map((r) => `${r.project}/${r.name}`), ['alpha/a', 'alpha/z', 'beta/b']);
+  assert.equal('id' in rows[0], false);
+  assert.ok(text.endsWith('\n'));
+  assert.equal(sharedFiltersJson([]), '[]\n');
+  assert.equal(path.relative(path.join(dir, 'docs'), sharedFile()), path.join('notes', 'shared-filters.json'));
 });

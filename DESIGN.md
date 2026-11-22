@@ -527,7 +527,8 @@ Route `#/admin` (manager+). Users table: email, name, roles per project, disable
 
 `npm run state:pull` (owner, local): reads `doc_state` + notes through `wrangler d1 execute <DB> --remote --json`
 (or `GET /api/export/state` with a service token), writes status / assignee / reviewer / tags into
-`docs/catalog.json`, appends notes to `docs/notes/<id>.md` (each after a script-written line `<!-- gitdocs-note:<id> -->`, matched as a whole line; the body is quoted with `> ` on every line so it cannot forge headings or markers), records the export time in `synced`, and prints a
+`docs/catalog.json`, appends notes to `docs/notes/<id>.md` (each after a script-written line `<!-- gitdocs-note:<id> -->`, matched as a whole line; the body is quoted with `> ` on every line so it cannot forge headings or markers), records the export time in `synced`, snapshots every project-shared filter into `docs/notes/shared-filters.json`
+(sorted, without D1 ids; `GET /api/export/state` also returns them as `sharedFilters`), and prints a
 suggested commit message. Git stays the long-term record; D1 is the live layer. `docs/notes/` is not scanned as
 documents and never deployed (it is still checked by `vault check`). Share builds (`--max-sensitivity`) drop the
 `reporter` / `assignee` / `reviewer` emails.

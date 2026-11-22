@@ -513,6 +513,7 @@ test('audit and export are owner-only', async () => {
   const e = (await call('owner@example.com', '/api/export/state?since=2000-01-01T00:00:00Z')).body;
   assert.deepEqual(e.docs.map((d) => [d.path, d.status]), [['docs/alpha/a.md', '已確認']]);
   assert.deepEqual(e.notes.map((n) => n.body), ['n1']);
+  assert.deepEqual(e.sharedFilters, [], 'shared filters: full snapshot (none yet)');
 });
 
 test('unknown routes 404, wrong methods 405', async () => {

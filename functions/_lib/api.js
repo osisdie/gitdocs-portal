@@ -686,5 +686,7 @@ async function exportState(c) {
   const since = c.url.searchParams.get('since') || '';
   const docs = await c.db.prepare('SELECT * FROM doc_state WHERE updated_at > ? ORDER BY updated_at').bind(since).all();
   const notes = await c.db.prepare('SELECT id, path, author, body, created_at FROM notes WHERE created_at > ? ORDER BY id').bind(since).all();
-  return json({ at: c.at, docs: docs.results.map((r) => ({ ...r, tags: parseTags(r.tags) })), notes: notes.results });
+  // shared filters are small: always the full set (a backup snapshot, not an incremental feed)
+  const shared = await c.db.prepare('SELECT project, name, params, created_by, created_at FROM shared_filters ORDER BY project, name').all();
+  return json({ at: c.at, docs: docs.results.map((r) => ({ ...r, tags: parseTags(r.tags) })), notes: notes.results, sharedFilters: shared.results });
 }

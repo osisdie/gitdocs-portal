@@ -3,7 +3,8 @@
 //   npm run state:pull [-- --dry-run] [--local] [--db=<database_name>]
 // Reads doc_state rows and notes that changed since the last pull (per path, table `synced`), writes status /
 // assignee / reviewer / tags into docs/catalog.json, appends notes to docs/notes/<id>.md, then records the exported
-// timestamps in `synced`. Git stays the long-term record; D1 is the live layer.
+// timestamps in `synced`. Project-shared saved filters are snapshotted whole into docs/notes/shared-filters.json
+// (docs/notes/ is neither scanned as documents nor deployed). Git stays the long-term record; D1 is the live layer.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -15,6 +16,15 @@ export const DOCS_SQL = `SELECT d.path, d.status, d.assignee, d.reviewer, d.tags
 FROM doc_state d LEFT JOIN synced s ON s.path = d.path WHERE s.at IS NULL OR d.updated_at > s.at ORDER BY d.updated_at`;
 export const NOTES_SQL = `SELECT n.id, n.path, n.author, n.body, n.created_at
 FROM notes n LEFT JOIN synced s ON s.path = n.path WHERE s.at IS NULL OR n.created_at > s.at ORDER BY n.id`;
+
+export const SHARED_SQL = 'SELECT project, name, params, created_by, created_at FROM shared_filters ORDER BY project, name';
+export const sharedFile = (notesDir = NOTES_DIR) => path.join(notesDir, 'shared-filters.json');
+/** Deterministic snapshot text of shared_filters rows (no D1 ids: they are not stable across databases). */
+export function sharedFiltersJson(rows) {
+  const clean = (rows || []).map((r) => ({ project: r.project, name: r.name, params: r.params, created_by: r.created_by, created_at: r.created_at }))
+    .sort((a, b) => (a.project + '\0' + a.name < b.project + '\0' + b.name ? -1 : 1));
+  return `${JSON.stringify(clean, null, 2)}\n`;
+}
 
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
@@ -123,12 +133,28 @@ async function main(argv) {
 
   const docs = wrangler(cwd, db, DOCS_SQL, local);
   const notes = wrangler(cwd, db, NOTES_SQL, local);
+  // shared filters: a full snapshot each time (migration 0003; an older database without the table is skipped)
+  let sharedChanged = false;
+  try {
+    const text = sharedFiltersJson(wrangler(cwd, db, SHARED_SQL, local));
+    const file = sharedFile();
+    const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : (text === '[]\n' ? text : '');
+    sharedChanged = before !== text;
+    if (sharedChanged) {
+      console.log(`shared filters → ${path.relative(CONTENT, file)}`);
+      if (!dry) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); }
+    }
+  } catch (e) { console.warn(`⚠ shared filters skipped: ${String(e.message).split('\n')[0]}`); }
   const catalog = loadCatalog();
   const result = applyExport(catalog, { docs, notes }, { write: !dry });
   for (const w of result.warnings) console.warn(`⚠ ${w}`);
   for (const d of result.docs) console.log(`#${d.id} ${d.path}: ${d.fields.join(', ')}`);
   for (const n of result.notes) console.log(`note ${n.id} → ${path.relative(CONTENT, n.file)}`);
-  if (!result.docs.length && !result.notes.length && !result.marks.size) { console.log('D1 沒有新的變更。'); return; }
+  if (!result.docs.length && !result.notes.length && !result.marks.size) {
+    if (sharedChanged && !dry) console.log(`\n建議 commit：\n\n  git add docs/notes/shared-filters.json && git commit -m "chore(state): shared filters snapshot"\n`);
+    else if (!sharedChanged) console.log('D1 沒有新的變更。');
+    return;
+  }
   if (dry) { console.log(`（--dry-run：沒有寫入檔案，也沒有更新 synced）`); return; }
   if (result.docs.length) saveCatalog(catalog);
   const sql = markSql(result.marks);

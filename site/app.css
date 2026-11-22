@@ -65,9 +65,6 @@ main { flex: 1; width: 100%; max-width: 1400px; margin: 0 auto; padding: 16px 20
 .loading, .empty { color: var(--muted); padding: 40px 0; text-align: center; }
 
 /* filter strip */
-.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
-.filters label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: none; }
-.filters select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: 14px var(--sans); }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 8px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
 .bar button { border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
 
@@ -211,7 +208,6 @@ h1 .chip.vis-pub { font-size: 12px; vertical-align: 3px; }
 
 /* keyword / tag chips */
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.chips.active { margin: 0 0 8px; }
 a.chip { text-decoration: none; color: var(--fg); }
 .chip.kw { font-size: 11.5px; padding: 0 7px; background: transparent; color: var(--muted); }
 .chip.tag { font-size: 11.5px; padding: 0 7px; background: var(--surface-2); color: var(--accent); }
@@ -370,7 +366,7 @@ tr.disabled td { opacity: .6; }
 
   /* touch targets */
   .icon-btn, .avatar { min-width: 40px; height: 40px; }
-  .btn, .bar button, .toc button, .menu-item, .filters select, .proj select, .search input, .wf input, .wf select, .uedit input, .uedit select, .focus summary { min-height: 40px; }
+  .btn, .bar button, .toc button, .menu-item, .proj select, .search input, .wf input, .wf select, .uedit input, .uedit select, .focus summary { min-height: 40px; }
   .btn, .bar button, .toc button { display: inline-flex; align-items: center; gap: .35em; }
   .saved-chip, .chip.tag, .chip.kw { padding-top: 4px; padding-bottom: 4px; }
   .linkish { min-height: 40px; }

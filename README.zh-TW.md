@@ -323,7 +323,8 @@ server mode 下，`機密` 以上的文件只有該專案的 **editor 以上**�
 ### 把狀態寫回 git
 
 網頁上的修改存在 D1。`npm run state:pull`（owner 在本機執行，透過 `wrangler d1 execute --remote`）會把有變動的
-狀態／處理人／確認人／標籤寫進 `docs/catalog.json`、把留言附加到 `docs/notes/<id>.md`、在 `synced` 表記下已匯出的時間，
+狀態／處理人／確認人／標籤寫進 `docs/catalog.json`、把留言附加到 `docs/notes/<id>.md`、把專案共用篩選整份快照到
+`docs/notes/shared-filters.json`、在 `synced` 表記下已匯出的時間，
 並印出建議的 commit 訊息。`--dry-run` 只顯示變更、不寫任何東西。資料庫名稱取自 `wrangler.toml`、`$D1_DATABASE` 或 `--db=<name>`。
 
 ### 安全性說明

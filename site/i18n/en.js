@@ -84,14 +84,10 @@ export default {
   'home.sec.sens': 'Sensitivity to review',
 
   // ---------- list ----------
-  'list.any': '(all)',
-  'list.addAnother': 'add another…',
   'list.savedFilters': 'Saved filters',
   'list.filtersLabel': 'Filters: ',
   'list.deleteFilter': 'Delete “{name}”',
   'list.saveFilter': '+ Save current filter',
-  'list.filters': 'Filters',
-  'list.kwTag': 'Keyword / tag',
   'list.sort': 'Sort',
   'list.remove': 'Remove',
   'list.showing': { one: 'Showing <b>{shown}</b> of {n} document', other: 'Showing <b>{shown}</b> of {n} documents' },
