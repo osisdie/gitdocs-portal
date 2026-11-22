@@ -1,5 +1,12 @@
 # gitdocs-portal
 
+[![ci](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](package.json)
+[![No npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-brightgreen.svg)](package.json)
+[![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%C2%B7%20Access%20%C2%B7%20D1-F38020?logo=cloudflare&logoColor=white)](README.md#deploying)
+[![i18n](https://img.shields.io/badge/i18n-English%20%C2%B7%20%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87-informational.svg)](README.md#interface-language)
+
 MantisBT 風格的文件入口，**git 就是資料庫**。把 HTML／Markdown／shell／Postman 檔案放進 `docs/`，build 一次，就有可依專案、關鍵字、機敏性分類與搜尋的入口網站，附每個檔案的 git 歷史；再加上 **vault**，讓憑證不進 git、文件本身照樣版本控管。產出是純靜態網站，參考部署是 Cloudflare Pages ＋ Cloudflare Access。
 
 [English → README.md](README.md)

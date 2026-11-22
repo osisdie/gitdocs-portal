@@ -1,5 +1,12 @@
 # gitdocs-portal
 
+[![ci](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](package.json)
+[![No npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-brightgreen.svg)](package.json)
+[![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%C2%B7%20Access%20%C2%B7%20D1-F38020?logo=cloudflare&logoColor=white)](#deploying)
+[![i18n](https://img.shields.io/badge/i18n-English%20%C2%B7%20%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87-informational.svg)](#interface-language)
+
 A MantisBT-style document portal where **git is the database**. Drop HTML / Markdown / shell / Postman files into
 `docs/`, run one build, and get a searchable, filterable portal with projects, keywords, sensitivity levels,
 per-file git history — and a **vault** that keeps credentials out of git while the documents around them stay
@@ -41,6 +48,9 @@ versioned. The output is a static site; the reference deployment is Cloudflare P
   moves secret variables into the vault.
 - **Workflow** (Mantis-style): `待處理 → 待確認 → 已確認 → 已發布 / 封存` (new → feedback → confirmed → published /
   archived), with `reporter` / `assignee` / `reviewer` per document.
+- **Knowledge graph** (Sigma.js): documents, projects and shared keywords as a force-directed graph — search,
+  layer toggles, zoom and rotate (↺ ↻, Shift+drag, two fingers on touch).
+- **Interface**: English / 繁體中文, light / dark / system theme, responsive down to phone width.
 - **Server mode** (optional): Pages Functions + D1 behind Cloudflare Access — per-project roles, web edits and notes,
   a server-side vault with an audit log. See [Server mode](#server-mode-multi-user).
 - No framework, no runtime dependencies. Node ≥ 20 for the build, Node ≥ 22 for `npm test`.
