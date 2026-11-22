@@ -7,7 +7,8 @@
 import { parseQuery, matchDoc, needsBody, queryHelp, SENSITIVITIES, sensRank, docCreated, docUpdated } from './query.js';
 import {
   panelFromQuery, queryFromPanel, emptyPanel, panelCount, toggleTag, ENUM_KEYS, PANEL_PEOPLE, DATE_FIELDS, translateLegacy,
-  parseSort, sortString, clickSort, sortComparator, PER_OPTIONS, parsePer, perParam, paginate, pageList, capQuery, Q_MAX } from './liststate.js';
+  parseSort, sortString, clickSort, sortComparator, PER_OPTIONS, parsePer, perParam, paginate, pageList, capQuery, Q_MAX,
+  DEFAULT_Q, TIME_OPTIONS, timeOfQuery, withTime, withKeywords, withDefaultQuery } from './liststate.js';
 import { mask as vaultMask, lock as vaultLock, isUnlocked as vaultUnlocked, revealDialog, revealSecretDialog, useServer as vaultUseServer, noRole } from './vault.js';
 import { NAME_RE } from './vault-core.js';
 import {
@@ -60,7 +61,8 @@ const who = (email) => (email ? `<span class="who">${esc(displayName(email))}</s
 function link(view, params = {}) {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
-    if (Array.isArray(v)) v.forEach((x) => sp.append(k, x)); else if (v) sp.set(k, v);
+    // an explicit empty q is kept: on the list view it means "no filter" (no q at all gets the 7-day default)
+    if (Array.isArray(v)) v.forEach((x) => sp.append(k, x)); else if (v || (k === 'q' && v === '')) sp.set(k, v);
   }
   const qs = sp.toString();
   return `#/${view}${qs ? '?' + qs : ''}`;
@@ -175,8 +177,7 @@ function chips(d, params, max = 8) {
   };
   const mk = (term, cls) => {
     const p = new URLSearchParams(params || '');
-    p.set('q', toggled(term)); p.delete('page');
-    if (!p.get('q')) p.delete('q');
+    p.set('q', toggled(term)); p.delete('page'); // may be empty: an explicit q= keeps "any time"
     const sel = on.has(term.toLowerCase());
     return `<a class="chip ${cls}${sel ? ' on' : ''}" href="#/list?${esc(p.toString())}"${sel ? ` title="${th('list.remove')}"` : ''}>${cls === 'tag' ? '#' : ''}${esc(term)}</a>`;
   };
@@ -247,11 +248,10 @@ function viewHome(params) {
 
 // ---------- list ----------
 // Filters live in the query (q=): the advanced panel and the search box edit the same string (site/liststate.js).
-const ADV_KEY = 'gitdocs:advOpen';
-const NARROW = () => window.matchMedia('(max-width: 720px)').matches;
+// Collapsed by default at every width (key renamed from gitdocs:advOpen so that default reached everyone once).
+const ADV_KEY = 'gitdocs:adv';
 function advOpen() {
-  try { const v = localStorage.getItem(ADV_KEY); if (v !== null) return v === '1'; } catch { /* storage blocked */ }
-  return !NARROW();
+  try { return localStorage.getItem(ADV_KEY) === '1'; } catch { return false; }
 }
 const setAdvOpen = (open) => { try { localStorage.setItem(ADV_KEY, open ? '1' : '0'); } catch { /* storage blocked */ } };
 let filtersMod;          // site/filters.js (saved filters, CSV export); null when it is not there
@@ -292,9 +292,7 @@ function advPanel(st, base) {
     ${tog('tagmode', 'any', th('flt.tagAny'), st.tagMode !== 'all', 'radio', 'tagmode')}${tog('tagmode', 'all', th('flt.tagAll'), st.tagMode === 'all', 'radio', 'tagmode')}</div>`;
   const presets = ['', '7d', '30d', 'month'];
   const preset = st.datePreset === 'custom' ? '' : st.datePreset;
-  const n = panelCount(st);
-  return `<details class="adv" id="adv"${advOpen() ? ' open' : ''}>
-    <summary><span>${th('flt.panel')}</span> <span class="adv-n${n ? ' on' : ''}">${th('flt.active', { n })}</span></summary>
+  return `<section class="adv" id="adv" aria-label="${esc(t('flt.panel'))}"${advOpen() ? '' : ' hidden'}>
     <div class="adv-body">
       ${msField('status', th('col.status'), DATA.statuses.filter((s) => inBase('status', s)), st.status, L.st)}
       ${msField('cat', th('col.category'), DATA.categories.filter((c) => inBase('category', c)), st.cat, L.cat)}
@@ -309,7 +307,25 @@ function advPanel(st, base) {
           <label class="sub">${th('flt.to')}<input type="date" data-date="to" data-fid="date:to" value="${esc(st.to)}"></label></div>
       </fieldset>
       <label class="sub adv-text">${th('flt.text')}<input type="search" data-text data-fid="text" value="${esc(st.rest)}" placeholder="${esc(t('flt.textHint'))}" autocomplete="off" spellcheck="false"></label>
-    </div></details>`;
+    </div></section>`;
+}
+/** Project <option>s of the header selector (top projects, their subprojects); `allText` labels the empty value. */
+function projectOptions(p, allText) {
+  const pubMark = (k) => (isPublicProject(DATA.projects, k) ? ` · ${t('vis.public')}` : '');
+  return opt('', p, allText) + topProjects().map((k) => opt(k, p, L.proj(k) + pubMark(k)) + Object.entries(DATA.projects).filter(([, v]) => v.parent === k)
+    .map(([sk, v]) => opt(sk, p, `　» ${v.title}`)).join('')).join('');
+}
+/** Simple search row (always shown): keywords = the free text of q, a time preset, the scope, and the panel toggle. */
+function simpleRow(st, q, p) {
+  const time = timeOfQuery(q);
+  const n = panelCount(st);
+  const open = advOpen();
+  return `<div class="simple" role="group" aria-label="${esc(t('flt.simple.label'))}">
+    <label class="s-kw"><span class="vh">${th('flt.simple.kw')}</span><input type="search" id="s-kw" data-fid="s:kw" value="${esc(st.rest)}" placeholder="${esc(t('flt.simple.kwHint'))}" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
+    <label class="s-time"><span class="vh">${th('flt.simple.time')}</span><select id="s-time" data-fid="s:time">${time === 'custom' ? opt('custom', time, t('flt.simple.custom')) : ''}${TIME_OPTIONS.map((v) => opt(v, time, t(`flt.preset.${v}`))).join('')}</select></label>
+    <label class="s-proj"><span class="vh">${th('flt.simple.proj')}</span><select id="s-proj" data-fid="s:proj">${projectOptions(p, t('flt.simple.allProjects'))}</select></label>
+    <button type="button" id="adv-btn" class="adv-btn" data-fid="s:adv" aria-controls="adv" aria-expanded="${open}"><span class="adv-caret" aria-hidden="true">${open ? '▾' : '▸'}</span> ${th('flt.panel')} <span class="adv-n${n ? ' on' : ''}">${th('flt.active', { n })}</span></button>
+  </div>`;
 }
 function readPanel(box) {
   const st = emptyPanel();
@@ -347,6 +363,9 @@ function savedFallback(p, q, curQuery) {
 async function viewList(params, seq = renderSeq) {
   const legacy = translateLegacy(params);
   if (legacy) { params = legacy; history.replaceState(null, '', `#/list${params.toString() ? `?${params}` : ''}`); }
+  // no q param at all (nav tab, a project link): last 7 days, shown in the URL; an explicit q= stays "any time"
+  const dflt = withDefaultQuery(params);
+  if (dflt) { params = dflt; history.replaceState(null, '', `#/list?${params}`); }
   const capped = capQuery(params.get('q') || '');
   if (capped.cut) { params = new URLSearchParams(params); params.set('q', capped.q); history.replaceState(null, '', `#/list?${params}`); }
   const q = params.get('q') || '';
@@ -386,7 +405,7 @@ async function viewList(params, seq = renderSeq) {
   };
   const SORTS = [['date', 'col.date'], ['id', 'col.id'], ['title', 'col.title'], ['status', 'col.status'], ['sens', 'col.sens'], ['project', 'col.project'],
     ...(pq.terms.length ? [['score', 'col.score']] : []), ...(showAssignee ? [['assignee', 'col.assignee']] : [])];
-  const scopeNote = (p ? th('list.inProject', { project: projTitle(p) }) : '') + (q ? th('list.forQuery', { q }) : '');
+  const scopeNote = (p ? th('list.inProject', { project: projTitle(p) }) : '') + (q && q !== DEFAULT_Q ? th('list.forQuery', { q }) : ''); // the default view needs no note
   const curQuery = (() => { const c = new URLSearchParams(); for (const k of ['p', 'q', 'sort', 'per']) if (params.get(k)) c.set(k, params.get(k)); return c.toString(); })();
   const primary = `${spec[0].key}:${spec[0].dir}`;
   const shown = rows.length ? th('pg.showing', { from: pg.start + 1, to: pg.end, n: rows.length, total: base.length }) : th('list.showing', { shown: 0, n: base.length });
@@ -398,6 +417,7 @@ async function viewList(params, seq = renderSeq) {
 
   app.innerHTML = `
     ${fm?.savedFiltersHtml ? fm.savedFiltersHtml({ project: p, curQuery }) : savedFallback(p, q, curQuery)}
+    ${simpleRow(st, q, p)}
     ${advPanel(st, base)}
     <div class="bar">
       <span>${shown}${scopeNote}${capped.cut ? ` <span class="dim small" role="status">${th('flt.qCut', { n: Q_MAX })}</span>` : ''}</span>
@@ -405,7 +425,7 @@ async function viewList(params, seq = renderSeq) {
         <label class="m-sort">${th('list.sort')}<select id="msort" data-fid="msort">${SORTS.flatMap(([k, l]) => [opt(`${k}:desc`, primary, `${t(l)} ↓`), opt(`${k}:asc`, primary, `${t(l)} ↑`)]).join('')}</select></label>
         <label class="per">${th('pg.per')}<select id="per" data-fid="per">${PER_OPTIONS.map((v) => opt(perParam(v), perParam(per), v ? String(v) : t('pg.all'))).join('')}</select></label>
         ${fm?.exportCsvButtonHtml ? fm.exportCsvButtonHtml() : ''}
-        ${q ? `<button type="button" id="reset">${th('list.reset')}</button>` : ''}
+        ${q !== DEFAULT_Q ? `<button type="button" id="reset">${th('list.reset')}</button>` : ''}
       </span>
     </div>
     ${pagerHtml}
@@ -426,33 +446,60 @@ async function viewList(params, seq = renderSeq) {
           ${showReviewer ? `<td class="c-who" data-label="${th('col.reviewer')}">${who(d.reviewer)}</td>` : ''}
           <td class="c-date nowrap dim">${esc((d.updated_at || d.date || '').slice(0, 10))}</td>
           <td class="c-type type">${esc(d.type)}</td>
-        </tr>`).join('')}</tbody></table></div>` : `<p class="empty">${th('list.empty')}</p>`}
+        </tr>`).join('')}</tbody></table></div>` : timeOfQuery(q) === '7d' ? `<div class="empty"><p>${th(q === DEFAULT_Q ? 'flt.simple.empty7d' : 'flt.simple.empty7dQ')}</p><button type="button" class="btn" id="s-any" data-fid="s:any">${th('flt.simple.anyTime')}</button></div>`
+      : `<p class="empty">${th('list.empty')}</p>`}
     ${pagerHtml}`;
 
   // navigation that keeps focus on the control that caused it (the list is re-rendered from scratch)
   const goList = (n, fid, caret) => { listFocus = fid ? { fid, caret } : null; go('list', n, true); };
-  const withQuery = (nq) => { const n = new URLSearchParams(params); if (nq) n.set('q', nq); else n.delete('q'); n.delete('page'); if (document.activeElement !== qInput) qInput.value = nq; return n; };
+  // an empty result is written as q= (any time), never dropped: no q at all would bring the 7-day default back
+  const withQuery = (nq) => { const n = new URLSearchParams(params); n.set('q', nq); n.delete('page'); if (document.activeElement !== qInput) qInput.value = nq; return n; };
   const box = $('#adv');
-  box.addEventListener('toggle', () => setAdvOpen(box.open));
+  const advBtn = $('#adv-btn');
+  advBtn.addEventListener('click', () => {
+    box.hidden = !box.hidden;
+    setAdvOpen(!box.hidden);
+    advBtn.setAttribute('aria-expanded', String(!box.hidden));
+    advBtn.querySelector('.adv-caret').textContent = box.hidden ? '▸' : '▾';
+  });
+  // simple row: every control writes canonical tokens into q. The keyword box and the panel's text box are the same
+  // free text: typing mirrors one into the other without navigating (a re-render on blur or after a debounce could
+  // swallow a click elsewhere); Enter applies it, and any other list control picks up the pending text.
+  const kw = $('#s-kw');
+  const text = box.querySelector('[data-text]');
+  kw.addEventListener('input', () => { text.value = kw.value; });
+  text.addEventListener('input', () => { kw.value = text.value; });
+  const rowQuery = () => withKeywords(q, kw.value);
+  /** Current params with the pending keyword text folded into q (page reset). */
+  const pending = () => withQuery(rowQuery());
+  kw.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (rowQuery() !== q) goList(pending(), 's:kw', kw.value.length);
+  });
+  $('#s-time').addEventListener('change', (e) => {
+    if (e.target.value === 'custom') return;
+    goList(withQuery(withTime(rowQuery(), e.target.value)), 's:time');
+  });
+  $('#s-proj').addEventListener('change', (e) => {
+    const n = pending(); n.delete('sec');
+    e.target.value ? n.set('p', e.target.value) : n.delete('p');
+    goList(n, 's:proj');
+  });
+  $('#s-any')?.addEventListener('click', () => goList(withQuery(withTime(rowQuery(), 'any')), 's:time'));
   const applyPanel = (stNext, fid, caret) => goList(withQuery(queryFromPanel(stNext)), fid, caret);
   box.addEventListener('change', (e) => {
     const el = e.target;
-    if (el.matches('[data-text]')) return; // handled on input (debounced)
+    if (el.matches('[data-text]')) return; // applied on Enter; other panel changes read it via readPanel
     const next = readPanel(box);
     if (el.dataset.add) { if (!el.value) return; next[el.dataset.add] = [...next[el.dataset.add], el.value]; }
     if (el.name === 'dpreset') { next.from = ''; next.to = ''; }
     if (el.dataset.date === 'from' || el.dataset.date === 'to') next.datePreset = '';
     applyPanel(next, el.dataset.add ? `add:${el.dataset.add}` : el.dataset.fid || (el.name ? `${el.name}:${el.value}` : ''));
   });
-  let textTimer;
-  const text = box.querySelector('[data-text]');
-  text.addEventListener('input', () => {
-    clearTimeout(textTimer);
-    textTimer = setTimeout(() => applyPanel(readPanel(box), 'text', text.selectionStart), 400);
-  });
-  text.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(textTimer); applyPanel(readPanel(box), 'text', text.selectionStart); } });
+  text.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyPanel(readPanel(box), 'text', text.selectionStart); } });
 
-  const setSort = (next, fid) => { const n = new URLSearchParams(params); n.set('sort', sortString(next)); n.delete('page'); goList(n, fid); };
+  const setSort = (next, fid) => { const n = pending(); n.set('sort', sortString(next)); goList(n, fid); };
   app.querySelectorAll('button[data-sort]').forEach((b) => {
     const k = b.dataset.sort;
     b.addEventListener('click', (e) => setSort(clickSort(spec, k, e.shiftKey), `sort:${k}`));
@@ -463,9 +510,10 @@ async function viewList(params, seq = renderSeq) {
   $('#per').addEventListener('change', (e) => {
     const v = parsePer(e.target.value);
     setPrefs({ listPer: v }).catch(() => { /* kept locally; the server copy catches up next time */ });
-    const n = new URLSearchParams(params); n.set('per', perParam(v)); n.delete('page'); goList(n, 'per');
+    const n = pending(); n.set('per', perParam(v)); goList(n, 'per');
   });
-  $('#reset')?.addEventListener('click', () => { qInput.value = ''; const n = new URLSearchParams(params); n.delete('q'); n.delete('page'); go('list', n, true); });
+  // clear filters = back to the default view (last 7 days): drop q entirely
+  $('#reset')?.addEventListener('click', () => { qInput.value = ''; const n = new URLSearchParams(params); n.delete('q'); n.delete('page'); goList(n, 's:time'); });
 
   if (fm?.bindSavedFilters) fm.bindSavedFilters(app, { project: p, curQuery, onApply: (query) => go('list', new URLSearchParams(query)) });
   else {
@@ -499,11 +547,12 @@ const SELF = '\u0000self'; // summary row for docs directly in the scoped top-le
 function countTable(docs, rowsOf, cols, field, colKey, rowLabel, rowLink, colLabel = (c) => c) {
   const rows = uniq(docs.map(rowsOf));
   const rowName = (r) => (r === SELF ? t('sum.thisProject') : L.proj(r));
-  const cell = (n, params) => n ? `<a href="${link('list', params)}">${n}</a>` : '<span class="zero">0</span>';
+  // counts cover every date, so the links say q= (any time) instead of getting the list's 7-day default
+  const cell = (n, params) => n ? `<a href="${link('list', { q: '', ...params })}">${n}</a>` : '<span class="zero">0</span>';
   return `<table class="matrix"><thead><tr><th>${esc(rowLabel)}</th>${cols.map((c) => `<th>${esc(colLabel(c))}</th>`).join('')}<th>${th('sum.total')}</th></tr></thead>
     <tbody>${rows.map((r) => {
       const rd = docs.filter((d) => rowsOf(d) === r);
-      return `<tr><td><a href="${link('list', rowLink(r))}">${esc(rowName(r))}</a></td>${cols.map((c) => `<td>${cell(rd.filter((d) => d[field] === c).length, { ...rowLink(r), [colKey]: c })}</td>`).join('')}<td>${cell(rd.length, rowLink(r))}</td></tr>`;
+      return `<tr><td><a href="${link('list', { q: '', ...rowLink(r) })}">${esc(rowName(r))}</a></td>${cols.map((c) => `<td>${cell(rd.filter((d) => d[field] === c).length, { ...rowLink(r), [colKey]: c })}</td>`).join('')}<td>${cell(rd.length, rowLink(r))}</td></tr>`;
     }).join('')}</tbody>
     <tfoot><tr><td>${th('sum.total')}</td>${cols.map((c) => `<td>${docs.filter((d) => d[field] === c).length}</td>`).join('')}<td>${docs.length}</td></tr></tfoot></table>`;
 }
@@ -622,7 +671,7 @@ function viewProject(name, params = new URLSearchParams(), seq = renderSeq) {
   app.innerHTML = `
     <div class="crumbs"><a href="#/list">${th('nav.list')}</a>${parent ? ` › <a href="#/project/${encodeURIComponent(parent)}">${esc(L.proj(parent))}</a>` : ''} › ${esc(title)}</div>
     <div class="detail-head"><div><h1>${esc(title)}${pubBadge(name)}</h1>${info?.desc ? `<p class="lead">${esc(info.desc)}</p>` : `<p class="lead dim">${th('prj.noDesc', { name })}</p>`}</div>
-      <div class="actions"><a class="btn primary" href="${scopeLink('list', name)}">${th('prj.listN', { n: docs.length })}</a><a class="btn" href="${scopeLink('summary', name)}">${th('nav.summary')}</a><a class="btn" href="${scopeLink('home', name)}">${th('nav.home')}</a></div></div>
+      <div class="actions"><a class="btn primary" href="${scopeLink('list', name, { q: '' })}">${th('prj.listN', { n: docs.length })}</a><a class="btn" href="${scopeLink('summary', name)}">${th('nav.summary')}</a><a class="btn" href="${scopeLink('home', name)}">${th('nav.home')}</a></div></div>
     ${sourceNote(sourceOfProject(DATA.projects, name))}
     ${subs.length ? `<h2 class="h2">${th('prj.subprojects')}</h2><div class="subgrid">${subs.map(([k, v]) => `<a class="card sub" href="#/project/${encodeURIComponent(k)}"><b>${esc(v.title)}${pubBadge(k)}</b><span class="dim">${th('prj.subCount', { n: scoped(k).length })}</span>${v.desc ? `<span class="desc">${esc(v.desc)}</span>` : ''}</a>`).join('')}</div>` : ''}
     <div class="grid3">
@@ -1043,10 +1092,7 @@ navBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleNav(!tabs.c
 
 // ---------- shell ----------
 function renderProjectSelect(p) {
-  const sel = $('#proj');
-  const pubMark = (k) => (isPublicProject(DATA.projects, k) ? ` · ${t('vis.public')}` : '');
-  sel.innerHTML = opt('', p, t('nav.allProjects')) + topProjects().map((k) => opt(k, p, L.proj(k) + pubMark(k)) + Object.entries(DATA.projects).filter(([, v]) => v.parent === k)
-    .map(([sk, v]) => opt(sk, p, `　» ${v.title}`)).join('')).join('');
+  $('#proj').innerHTML = projectOptions(p, t('nav.allProjects'));
 }
 /** Profile menu, footer legends and build line: everything outside #app that depends on data and language. */
 function renderChrome() {
@@ -1102,7 +1148,8 @@ qInput.addEventListener('input', () => {
   qTimer = setTimeout(() => {
     const { view, params } = parseHash();
     const n = view === 'list' ? new URLSearchParams(params) : new URLSearchParams(params.get('p') ? { p: params.get('p') } : {});
-    qInput.value ? n.set('q', qInput.value) : n.delete('q');
+    // on the list view an emptied box is an explicit q= (any time); elsewhere no q → the list's 7-day default
+    if (qInput.value || view === 'list') n.set('q', qInput.value); else n.delete('q');
     n.delete('sort'); n.delete('dir'); n.delete('page');
     go('list', n, view === 'list');
   }, 180);

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   panelFromQuery, queryFromPanel, emptyPanel, panelCount, toggleTag, hasTag, quoteVal, translateLegacy,
   parseSort, sortString, clickSort, sortComparator, parsePer, perParam, paginate, pageList,
+  DEFAULT_Q, TIME_PRESETS, timeOfQuery, withTime, withKeywords, withDefaultQuery,
 } from '../site/liststate.js';
 
 test('panel ⇄ query round trip keeps unrepresentable tokens in rest', () => {
@@ -109,4 +110,47 @@ test('capQuery: search text longer than Q_MAX is cut at a word boundary', async 
   assert.equal(r.cut, true);
   assert.ok(r.q.length <= Q_MAX);
   assert.ok(long.startsWith(r.q + ' '), 'cut on a token boundary');
+});
+
+test('simple row: time option of a query', () => {
+  assert.equal(DEFAULT_Q, 'updated>=-7d');
+  assert.equal(timeOfQuery(DEFAULT_Q), '7d');
+  assert.equal(timeOfQuery('api updated>=-30d s:open'), '30d');
+  assert.equal(timeOfQuery('updated:this-month'), 'month');
+  assert.equal(timeOfQuery(''), 'any');
+  assert.equal(timeOfQuery('api s:open'), 'any');
+  assert.equal(timeOfQuery('date>=-7d'), 'custom', 'another date field');
+  assert.equal(timeOfQuery('updated>=2026-11-01'), 'custom', 'a range');
+  assert.equal(timeOfQuery('updated>=-7d created>=-30d'), 'custom', 'a second date condition (kept in rest)');
+  assert.equal(timeOfQuery('-updated>=-7d'), 'custom', 'a negated date');
+  assert.equal(timeOfQuery('date:2026-11'), 'custom');
+  for (const [k, tok] of Object.entries(TIME_PRESETS)) assert.equal(timeOfQuery(tok), k);
+});
+
+test('simple row: withTime replaces every date condition and keeps the rest', () => {
+  assert.equal(withTime('api s:open', '7d'), 's:open updated>=-7d api');
+  assert.equal(withTime('updated>=-7d api', '30d'), 'updated>=-30d api');
+  assert.equal(withTime('updated>=-7d api', 'month'), 'updated:this-month api');
+  assert.equal(withTime('updated>=-7d', 'any'), '');
+  assert.equal(withTime('created>=2026-01-01 created<=2026-02-01 x', 'any'), 'x');
+  assert.equal(withTime('date>=-7d -updated>=-30d after:2026-01-01 api', '7d'), 'updated>=-7d api', 'dates in rest go too');
+  assert.equal(withTime('api', 'bogus'), 'api', 'unknown preset = no date');
+});
+
+test('simple row: withKeywords sets the free text and keeps panel tokens', () => {
+  assert.equal(withKeywords('updated>=-7d', 'api "rate limit"'), 'updated>=-7d api "rate limit"');
+  assert.equal(withKeywords('s:open updated>=-7d old words', ' new '), 's:open updated>=-7d new');
+  assert.equal(withKeywords('s:open old', ''), 's:open');
+  assert.equal(withKeywords('', 'x'), 'x');
+});
+
+test('default query: only when the q param is absent', () => {
+  assert.equal(withDefaultQuery(new URLSearchParams('p=a')).toString(), 'p=a&q=updated%3E%3D-7d');
+  assert.equal(withDefaultQuery(new URLSearchParams('')).get('q'), DEFAULT_Q);
+  assert.equal(withDefaultQuery(new URLSearchParams('q=')), null, 'explicit empty q = any time');
+  assert.equal(withDefaultQuery(new URLSearchParams('q')), null);
+  assert.equal(withDefaultQuery(new URLSearchParams('q=s:open')), null);
+  assert.equal(new URLSearchParams([['p', 'a'], ['q', '']]).toString(), 'p=a&q=', 'the marker survives serialization');
+  // legacy params are translated first: their tokens become q, so the default does not apply
+  assert.equal(withDefaultQuery(translateLegacy(new URLSearchParams('s=待處理'))), null);
 });

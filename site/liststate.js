@@ -6,6 +6,7 @@
 //   s:open,in-review  cat:plan  sens:internal,confidential  type:md  tag:a,b (any) | tag:a+b (all)
 //   reporter:/assignee:/reviewer:me,none,<email>  date|created|updated >=-7d | >=-30d | :this-month | >=from <=to
 // Tokens the panel cannot show (negations, partial values, other fields, free text) are kept verbatim in `rest`.
+// No q param at all → DEFAULT_Q (last 7 days); an explicit empty `q=` is "any time" and stays empty.
 import { tokenize, valueGroups, PEOPLE_KEYS } from './query.js';
 import { ENUMS, enumValue } from './i18n.js';
 
@@ -122,7 +123,48 @@ export function queryFromPanel(st) {
 export const panelCount = (st) => [...ENUM_KEYS, 'tag', ...PANEL_PEOPLE].filter((k) => st[k]?.length).length
   + (st.datePreset || st.from || st.to ? 1 : 0);
 
-/** Add or remove one tag in a query (the tag chips in the list rows); keeps the any / all mode and everything else. */
+// ---------- simple search row: time presets, default query ----------
+/**
+ * #/list opened without a q param at all gets this query (history.replaceState). An explicit empty `q=` means
+ * "any time / no filter" and is kept as such, so the default is not applied again.
+ */
+export const DEFAULT_Q = 'updated>=-7d';
+/** Time select of the simple row → the date token it writes ('' = no date condition). */
+export const TIME_PRESETS = { '7d': 'updated>=-7d', '30d': 'updated>=-30d', month: 'updated:this-month', any: '' };
+export const TIME_OPTIONS = ['7d', '30d', 'month', 'any'];
+const isDateTok = (tok) => Boolean(tok.key) && (DATE_FIELDS.includes(tok.key) || tok.key === 'after' || tok.key === 'before');
+/**
+ * The time option a query shows in the simple row: '7d' | '30d' | 'month' (one `updated` preset and no other date
+ * condition), 'any' (no date condition at all) or 'custom' (any other date condition, left untouched).
+ */
+export function timeOfQuery(q = '') {
+  const st = panelFromQuery(q);
+  const inRest = tokenize(st.rest).some(isDateTok);
+  if (!st.datePreset && !st.from && !st.to) return inRest ? 'custom' : 'any';
+  if (!inRest && st.dateField === 'updated' && ['7d', '30d', 'month'].includes(st.datePreset)) return st.datePreset;
+  return 'custom';
+}
+/** `q` with every date condition (panel or free text, negated too) replaced by the preset's token; the rest is kept. */
+export function withTime(q = '', preset = 'any') {
+  const st = panelFromQuery(q);
+  Object.assign(st, { dateField: 'updated', datePreset: TIME_PRESETS[preset] ? preset : '', from: '', to: '' });
+  st.rest = tokenize(st.rest).filter((tok) => !isDateTok(tok)).map((tok) => tok.raw).join(' ');
+  return queryFromPanel(st);
+}
+/** `q` with its free text (the panel's `rest`) replaced by `text`; panel tokens stay. */
+export function withKeywords(q = '', text = '') {
+  const st = panelFromQuery(q);
+  st.rest = String(text ?? '').trim();
+  return queryFromPanel(st);
+}
+/** List params with the default query added, or null when the URL already says what it wants (q present, even empty). */
+export function withDefaultQuery(params) {
+  const sp = new URLSearchParams(params);
+  if (sp.has('q')) return null;
+  sp.set('q', DEFAULT_Q);
+  return sp;
+}
+
 // ---------- query size ----------
 /** Longest search text the list view works with (saved filters are capped at 1000 server-side; a crafted link is not). */
 export const Q_MAX = 2000;
@@ -134,6 +176,7 @@ export function capQuery(q = '') {
   return { q: (sp > 0 ? head.slice(0, sp) : head).trimEnd(), cut: true };
 }
 
+/** Add or remove one tag in a query (the tag chips in the list rows); keeps the any / all mode and everything else. */
 export function toggleTag(q, tag) {
   const st = panelFromQuery(q);
   const has = st.tag.some((x) => x.toLowerCase() === String(tag).toLowerCase());

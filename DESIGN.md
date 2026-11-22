@@ -459,8 +459,27 @@ The list view's saved-filters bar (`site/filters.js`) shows three kinds of filte
   English label matches exactly, anything else partially. created = `created`, else the oldest of the (≤ 20) listed
   commits, else the doc date; updated = the newer of server `updated_at` and the last commit. The CLI resolves `me`
   from `git config user.email` and reads git history only when the query uses created / updated.
-- The **advanced filter panel** (`<details>`, open/closed remembered per browser in `localStorage`
-  `gitdocs:advOpen`) shows status / category / sensitivity / format as toggle chips, tags with any / all, reporter /
+- The **simple search row** is always shown above the panel: a keyword box (the free text of `q=`, the same text as
+  the panel's text box; the two mirror each other while typing; applied on Enter only — no re-render on blur or
+  after a pause, which could swallow a click — and any other list control (time, project, panel, sort, page size)
+  carries the pending text along), a time select (Last 7 days / Last 30 days / This month / Any
+  time → `updated>=-7d`, `updated>=-30d`, `updated:this-month`, no date token; any other date condition shows
+  "Custom (advanced)" and is left alone until a preset is picked, which then replaces every date token), a project
+  select (the header selector's options with "All accessible projects"; both set `p=` and stay in sync) and the
+  advanced toggle with the active-condition count. Everything it writes is canonical tokens in `q=`
+  (`site/liststate.js` `timeOfQuery` / `withTime` / `withKeywords`).
+- **Default: last 7 days.** `#/list` without a `q` param at all (nav tab, crumbs, a link with only `p=`) gets
+  `q=updated>=-7d` through `history.replaceState`. An **explicit empty `q=`** is the "any time / no filter" marker
+  and is never replaced: "Any time", clearing the keyword / header search on the list, removing the last tag chip
+  and panel edits that end empty all write `q=`; `link()` keeps `q: ''`. Links that carry a count over all dates
+  (summary row totals, the project page's "list N documents") pass `q=`; links with their own query (summary cells,
+  saved / shared filters, tag chips, legacy params, which `translateLegacy` folds into `q` first) are unchanged.
+  "Clear filters" removes `q` and so returns to the default; it and the bar's "search …" note are hidden on the
+  default view. With 0 rows and the
+  7-day preset as the only date condition the list says "No documents updated in the last 7 days" with a
+  "Show any time" button.
+- The **advanced filter panel** (collapsed by default at every width; open/closed remembered per browser in
+  `localStorage` `gitdocs:adv` — renamed from `gitdocs:advOpen` so the new default reached everyone once) shows status / category / sensitivity / format as toggle chips, tags with any / all, reporter /
   assignee / reviewer (Me in server mode, (none), people in scope), a date field (doc / created / updated) with
   presets (7 / 30 days, this month) or from–to, and the remaining text. It is a view of `q=`: changing it writes
   canonical tokens (`site/liststate.js`), typing a query updates it; tokens it cannot show (negations, partial
