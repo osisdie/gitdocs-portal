@@ -1,5 +1,7 @@
 # gitdocs-portal
 
+[English](README.md) · **繁體中文**
+
 [![ci](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](package.json)
@@ -9,10 +11,9 @@
 
 MantisBT 風格的文件入口，**git 就是資料庫**。把 HTML／Markdown／shell／Postman 檔案放進 `docs/`，build 一次，就有可依專案、關鍵字、機敏性分類與搜尋的入口網站，附每個檔案的 git 歷史；再加上 **vault**，讓憑證不進 git、文件本身照樣版本控管。產出是純靜態網站，參考部署是 Cloudflare Pages ＋ Cloudflare Access。
 
-[English → README.md](README.md)
-
 ## 目錄
 
+- [功能特色](#功能特色)
 - [畫面截圖](#畫面截圖)
 - [核心程式與內容 repo 分開](#核心程式與內容-repo-分開)
 - [Vault：憑證遮罩](#vault憑證遮罩)
@@ -30,6 +31,23 @@ MantisBT 風格的文件入口，**git 就是資料庫**。把 HTML／Markdown�
   - [機密文件](#機密文件)
 - [外部內容來源](#外部內容來源)
 - [貢獻](#貢獻)
+
+## 功能特色
+
+- **專案／子專案**：依資料夾（`docs/<專案>/<子專案>/…`）自動分組，跟 Mantis 一樣有專案切換器。
+- **自動推斷欄位**：編號、分類、狀態、日期、關鍵字（以 regex 字典比對）、機敏性；都能用 CLI 修改，集中存在
+  `docs/catalog.json`。
+- **全文搜尋**：小型查詢語法（`p:`、`cat:`、`s:`、`sens>=`、`k:`、`date>=`、`-排除`、`"片語"`），瀏覽器和 CLI 共用。
+- **多種檢視**：可排序欄位、可存成常用篩選的清單，摘要矩陣、時間軸、專案頁；文件頁附相關／取代／相似文件與 git 歷史。
+- **機敏性**：`公開 / 內部 / 機密 / 極機密`；等級越高，越早排除在搜尋索引或整個部署之外。
+- **Vault**：`{{vault:name}}` 顯示成 `••••••••`，附顯示／複製按鈕；值加密存在 `vault/vault.json`，只在輸入通關密語後於瀏覽器解密。
+- **Postman**：environment 和 collection 檔都是一般文件；`npm run vault -- postman <file>` 會把機密變數搬進 vault。
+- **工作流程**（Mantis 風格）：`待處理 → 待確認 → 已確認 → 已發布 / 封存`，每份文件有 `reporter`／`assignee`／`reviewer`。
+- **Server mode**（選用）：Cloudflare Access 後面的 Pages Functions ＋ D1，提供每個專案的角色權限、網頁編輯與備註、
+  伺服器端 vault 與稽核紀錄。見 [Server mode](#server-mode多人模式)。
+- **關聯圖**（Sigma.js）：文件、專案與共同關鍵字的力導向圖，可搜尋、切換圖層、縮放與旋轉（↺ ↻、Shift 拖曳、觸控雙指）。
+- **介面**：English／繁體中文、淺色／深色／跟隨系統主題，RWD 到手機寬度。
+- 不用框架、沒有執行期相依套件。build 需要 Node ≥ 20，`npm test` 需要 Node ≥ 22。
 
 ## 畫面截圖
 
@@ -60,10 +78,6 @@ MantisBT 風格的文件入口，**git 就是資料庫**。把 HTML／Markdown�
 **管理：各專案角色與邀請**
 
 ![管理：使用者](assets/screenshots/09-admin-users.png)
-
-**手機版：文件頁，內容優先**
-
-![手機版文件頁](assets/screenshots/14-mobile-doc.png)
 
 全部 15 張截圖（摘要、時間軸、深色主題、個人選單、專案管理、繁體中文介面…）：[assets/screenshots/](assets/screenshots/README.zh-TW.md)。
 以 `npm run screenshots` 重新產生：`examples/` 的示範內容、模擬的伺服器模式 API、以固定版本 `playwright-core` 驅動的

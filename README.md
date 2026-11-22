@@ -1,5 +1,7 @@
 # gitdocs-portal
 
+**English** · [繁體中文](README.zh-TW.md)
+
 [![ci](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/osisdie/gitdocs-portal/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](package.json)
@@ -11,8 +13,6 @@ A MantisBT-style document portal where **git is the database**. Drop HTML / Mark
 `docs/`, run one build, and get a searchable, filterable portal with projects, keywords, sensitivity levels,
 per-file git history — and a **vault** that keeps credentials out of git while the documents around them stay
 versioned. The output is a static site; the reference deployment is Cloudflare Pages behind Cloudflare Access.
-
-[繁體中文說明 → README.zh-TW.md](README.zh-TW.md)
 
 ## Contents
 
@@ -84,10 +84,6 @@ versioned. The output is a static site; the reference deployment is Cloudflare P
 **Admin — per-project roles and invitations**
 
 ![Admin users](assets/screenshots/09-admin-users.png)
-
-**Mobile — document page, content first**
-
-![Mobile document page](assets/screenshots/14-mobile-doc.png)
 
 All 15 screenshots (summary, timeline, dark theme, profile menu, admin projects, zh-TW, …): [assets/screenshots/](assets/screenshots/README.md).
 Regenerate with `npm run screenshots` — demo content from `examples/`, a mocked server-mode API, headless Chromium via a

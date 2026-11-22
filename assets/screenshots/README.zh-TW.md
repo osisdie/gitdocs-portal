@@ -1,7 +1,9 @@
 # 畫面截圖
 
+[English](README.md) · **繁體中文**
+
 由 `npm run screenshots`（tools/screenshots/capture.mjs）以 `examples/` 的示範內容和模擬的
-伺服器模式 API 產生，請勿手動修改。[English](README.md)
+伺服器模式 API 產生，請勿手動修改。
 
 **首頁：一眼看出哪些事在等你**
 
@@ -53,11 +55,11 @@
 
 **手機版：首頁**
 
-![手機版：首頁](13-mobile-home.png)
+<img src="13-mobile-home.png" alt="手機版：首頁" width="360">
 
 **手機版：文件頁，內容優先**
 
-![手機版：文件頁，內容優先](14-mobile-doc.png)
+<img src="14-mobile-doc.png" alt="手機版：文件頁，內容優先" width="360">
 
 **繁體中文介面（zh-TW）**
 
