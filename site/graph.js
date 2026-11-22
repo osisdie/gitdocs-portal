@@ -363,7 +363,9 @@ function shellHtml(data, scope, site) {
         <button type="button" data-act="relayout">${th('graph.relayout')}</button>
         <button type="button" data-act="in" aria-label="${th('graph.zoomIn')}" title="${th('graph.zoomIn')}">＋</button>
         <button type="button" data-act="out" aria-label="${th('graph.zoomOut')}" title="${th('graph.zoomOut')}">－</button>
-        <button type="button" data-act="reset" aria-label="${th('graph.resetView')}" title="${th('graph.resetView')}">⟲</button>
+        <button type="button" data-act="ccw" aria-label="${th('graph.rotateLeft')}" title="${th('graph.rotateHint')}">↺</button>
+        <button type="button" data-act="cw" aria-label="${th('graph.rotateRight')}" title="${th('graph.rotateHint')}">↻</button>
+        <button type="button" data-act="reset" aria-label="${th('graph.resetView')}" title="${th('graph.resetView')}">◎</button>
       </div>
       <span class="gx-status" role="status" aria-live="polite"></span>
     </div>
@@ -555,23 +557,61 @@ function bindToolbar(ctx) {
     relayout: () => { reseed(ctx); runLayout(ctx); cam().animatedReset({ duration: 300 }); },
     in: () => cam().animatedZoom({ duration: 250 }),
     out: () => cam().animatedUnzoom({ duration: 250 }),
-    reset: () => { setFocus(ctx, null, 'selected'); cam().animatedReset({ duration: 300 }); },
+    reset: () => { setFocus(ctx, null, 'selected'); cam().animatedReset({ duration: 300 }); }, // also back to angle 0
+    ccw: () => rotateBy(ctx, -ROTATE_STEP),
+    cw: () => rotateBy(ctx, ROTATE_STEP),
   };
   root.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => acts[b.dataset.act](), { signal }));
 }
 
+// ---------- rotation ----------
+// Touch: sigma's own two-finger gesture (enableCameraRotation, on by default). Mouse: the ↺ ↻ buttons, or Shift+drag
+// around the stage centre. Labels stay upright; only node positions turn. In screen coordinates (y down) a growing
+// camera angle turns the graph clockwise, same sense as atan2 of the pointer: ↻ / dragging clockwise → clockwise.
+const ROTATE_STEP = Math.PI / 12; // 15°
+function rotateBy(ctx, delta) {
+  const cam = ctx.sigma.getCamera();
+  if (cam.isAnimated()) return;
+  cam.animate({ angle: cam.getState().angle + delta }, { duration: 200 });
+}
+function bindRotateDrag(ctx) {
+  const { sigma, stage } = ctx;
+  const mouse = sigma.getMouseCaptor();
+  let drag = null;
+  const angleAt = (e) => Math.atan2(e.y - stage.clientHeight / 2, e.x - stage.clientWidth / 2);
+  mouse.on('mousedown', (e) => {
+    if (!e.original.shiftKey || e.original.button !== 0) return;
+    drag = { from: angleAt(e), start: sigma.getCamera().getState().angle, moved: false };
+    stage.style.cursor = 'grabbing';
+  });
+  mouse.on('mousemovebody', (e) => {
+    if (!drag) return;
+    e.preventSigmaDefault(); // no panning while rotating
+    drag.moved = true;
+    sigma.getCamera().setState({ angle: drag.start + (angleAt(e) - drag.from) });
+  });
+  mouse.on('mouseup', () => {
+    if (!drag) return;
+    if (drag.moved) { ctx.suppressClick = true; setTimeout(() => { ctx.suppressClick = false; }, 0); } // the click that ends the drag
+    drag = null;
+    stage.style.cursor = '';
+  });
+}
+
 function bindSigma(ctx, go) {
   const { sigma, stage } = ctx;
+  bindRotateDrag(ctx);
   sigma.on('enterNode', ({ node }) => { stage.style.cursor = 'pointer'; setFocus(ctx, node, 'hovered'); });
   sigma.on('leaveNode', () => { stage.style.cursor = ''; setFocus(ctx, null, 'hovered'); });
   sigma.on('clickNode', ({ node, event }) => {
+    if (ctx.suppressClick) return;
     const touch = event?.original && 'touches' in event.original;
     // On touch there is no hover: the first tap shows the neighbourhood, a second tap on the same node opens it.
     if (touch && ctx.selected !== node) { focusNode(ctx, node); return; }
     const href = ctx.graph.getNodeAttribute(node, 'href');
     if (href && typeof go === 'function') go(href);
   });
-  sigma.on('clickStage', () => { if (ctx.selected) setFocus(ctx, null, 'selected'); });
+  sigma.on('clickStage', () => { if (!ctx.suppressClick && ctx.selected) setFocus(ctx, null, 'selected'); });
 }
 
 function applyTheme(ctx) {
