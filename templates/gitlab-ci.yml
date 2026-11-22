@@ -1,0 +1,25 @@
+# CI for a content repo on GitLab (copy to .gitlab-ci.yml).
+#  check  — engine files must match gitdocs-portal upstream; catalog builds; every {{vault:…}} resolves; no plaintext credentials.
+#  deploy — manual, default branch only; needs CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / CF_PAGES_PROJECT as masked CI variables.
+image: node:22-alpine
+variables:
+  GIT_DEPTH: 0            # full history: the portal shows per-file git history
+stages: [check, deploy]
+default:
+  before_script: [apk add --no-cache git bash >/dev/null]
+
+check:
+  stage: check
+  script:
+    - bash scripts/engine.sh check
+    - node scripts/build.mjs --check
+    - node scripts/vault.mjs check
+
+deploy:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CLOUDFLARE_API_TOKEN'
+      when: manual
+  script:
+    - node scripts/build.mjs
+    - npx --yes wrangler@4.166.0 pages deploy dist --project-name "$CF_PAGES_PROJECT" --branch main --commit-dirty=true

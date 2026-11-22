@@ -1,0 +1,10 @@
+/*
+  X-Robots-Tag: noindex, nofollow
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: same-origin
+/catalog.json
+  Cache-Control: no-cache
+/search-index.json
+  Cache-Control: no-cache
+/vault.json
+  Cache-Control: no-store

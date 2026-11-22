@@ -1,0 +1,20 @@
+{
+  "name": "gitdocs-portal",
+  "version": "0.1.0",
+  "description": "A MantisBT-style document portal where git is the database: projects, keywords, sensitivity levels, full-text search, and a vault that masks credentials. Static build for Cloudflare Pages + Access.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:share": "node scripts/build.mjs --max-sensitivity=內部",
+    "check": "node scripts/build.mjs --check && node scripts/vault.mjs check",
+    "dev": "node scripts/build.mjs && npx --yes serve@14.2.4 dist -l 8788",
+    "deploy": "node scripts/build.mjs && bash scripts/deploy.sh",
+    "doc": "node scripts/doc.mjs",
+    "vault": "node scripts/vault.mjs",
+    "engine:update": "bash scripts/engine.sh update",
+    "engine:check": "bash scripts/engine.sh check"
+  }
+}

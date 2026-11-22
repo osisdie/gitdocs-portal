@@ -1,0 +1,7 @@
+# Engine-owned paths. A content repo (docs + vault) vendors these from gitdocs-portal and must not edit them;
+# `npm run engine:update` copies them from upstream, `npm run engine:check` (CI) fails when they drift.
+site/
+scripts/
+package.json
+LICENSE
+.env.example

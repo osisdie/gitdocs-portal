@@ -1,0 +1,14 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# Windows download markers
+*:Zone.Identifier
+
+# build / tooling
+node_modules/
+dist/
+.wrangler/
+.playwright-mcp/
+.DS_Store

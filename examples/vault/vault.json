@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "kdf": {
+    "name": "PBKDF2",
+    "hash": "SHA-256",
+    "iterations": 600000,
+    "salt": "qkxU5IxE4yR5EhyKx/zKOg=="
+  },
+  "check": {
+    "iv": "rnkdVMQwBAq25GQj",
+    "ct": "vv/6yzRs/g0iBdRiXpmnpcQxFEnOGirJtm9q8to9R9k="
+  },
+  "secrets": {
+    "demo/api-token": {
+      "iv": "vg0kZGndxfSuCz2s",
+      "ct": "sDAOUd80dOEZ7/jMgqUQ9dkxnOQT1X35nsqmBqLcWqH7IttEUSmaxvA=",
+      "note": "demo staging token",
+      "updated": "2026-11-22"
+    },
+    "demo/db-password": {
+      "iv": "ezW+WJ7plKrm71EH",
+      "ct": "GKA2s2BITlu8A5gL02c8Y86J2TKpV5pljqmLcy0Lk9JSjsyCqio=",
+      "note": "demo staging db",
+      "updated": "2026-11-22"
+    },
+    "postman/demo-service/api_token": {
+      "iv": "9JUvD3J3DYGPCSYE",
+      "ct": "cBvpJb8EPYyUw8N82FoUQrtfB1CQ8q50p38petw/ie9t0w==",
+      "note": "postman demo",
+      "updated": "2026-11-22"
+    },
+    "postman/demo-service/client_secret": {
+      "iv": "LF3wzGh5z7V1T01w",
+      "ct": "+iUGh7A5bId37cr1Hz6y5syw6EbKIUsFIhXoH9lAvHjZo+ZlefoKHV44",
+      "note": "postman demo",
+      "updated": "2026-11-22"
+    }
+  }
+}

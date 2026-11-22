@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-Hant" data-gitdocs-portal>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>docs</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23245c73'/%3E%3Cpath d='M9 8h9l5 5v11H9z' fill='none' stroke='white' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#/list"><span class="logo" aria-hidden="true"></span><span class="brand-name">docs</span></a>
+  <label class="proj"><span class="sr">專案</span><select id="proj" title="專案範圍"></select></label>
+  <nav class="tabs" aria-label="主選單">
+    <a href="#/list" data-view="list">文件列表</a>
+    <a href="#/summary" data-view="summary">摘要</a>
+    <a href="#/timeline" data-view="timeline">時間軸</a>
+  </nav>
+  <div class="search">
+    <label class="grow"><span class="sr">搜尋</span>
+      <input id="q" type="search" placeholder="搜尋…  例：k:API cat:評估 -封存  ( / )" autocomplete="off"></label>
+    <button id="qhelp" class="icon-btn" type="button" aria-expanded="false" aria-controls="helppop" title="搜尋語法">?</button>
+    <div id="helppop" class="helppop" hidden></div>
+  </div>
+  <button id="theme" class="icon-btn" type="button" title="切換深淺色" aria-label="切換深淺色">◐</button>
+</header>
+
+<main id="app" tabindex="-1"><p class="loading">載入中…</p></main>
+
+<footer class="foot">
+  <div class="legends"><div class="legend" id="legend"></div><div class="legend" id="legend-sens"></div></div>
+  <div class="meta"><span id="built"></span> <button type="button" id="vault-lock" class="linkish" hidden title="清除這個分頁的 vault 金鑰">鎖定 vault</button></div>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

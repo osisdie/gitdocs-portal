@@ -1,0 +1,150 @@
+{
+  "site": {
+    "title": "gitdocs demo",
+    "projectRoot": "",
+    "readmeIndex": ""
+  },
+  "categories": [
+    "計畫",
+    "評估",
+    "比較",
+    "稽核",
+    "設計／UX",
+    "表單",
+    "API",
+    "技能手冊",
+    "劇本／文案",
+    "腳本",
+    "索引",
+    "報告"
+  ],
+  "statuses": [
+    "草稿",
+    "審查中",
+    "本機",
+    "已發布",
+    "封存"
+  ],
+  "sensitivities": [
+    "公開",
+    "內部",
+    "機密",
+    "極機密"
+  ],
+  "projects": {
+    "api": {
+      "title": "api",
+      "desc": ""
+    },
+    "handbook": {
+      "title": "handbook",
+      "desc": ""
+    },
+    "reports": {
+      "title": "reports",
+      "desc": ""
+    }
+  },
+  "filters": [
+    {
+      "name": "最近 30 天",
+      "query": "after:-30d"
+    },
+    {
+      "name": "已發布",
+      "query": "s:已發布"
+    },
+    {
+      "name": "機密以上",
+      "query": "sens>=機密"
+    },
+    {
+      "name": "計畫",
+      "query": "cat:計畫"
+    }
+  ],
+  "keywords": {
+    "API": [
+      "\bapi\b",
+      "postman",
+      "openapi",
+      "swagger"
+    ],
+    "CI": [
+      "\bci\b",
+      "github actions",
+      "gitlab ci"
+    ],
+    "測試": [
+      "測試",
+      "\btests?\b",
+      "\bcoverage\b"
+    ],
+    "成本": [
+      "成本",
+      "\bcosts?\b",
+      "\bpricing\b"
+    ],
+    "登入／OAuth": [
+      "\boauth\b",
+      "登入",
+      "\bsso\b"
+    ],
+    "UX": [
+      "\bux\b",
+      "\bmockups?\b"
+    ],
+    "GDPR／隱私": [
+      "\bgdpr\b",
+      "隱私",
+      "個資"
+    ],
+    "Prompt": [
+      "\bprompts?\b"
+    ]
+  },
+  "docs": {
+    "docs/handbook/2026-11-01-getting-started.md": {
+      "id": 1,
+      "title": "Getting started",
+      "project": "handbook",
+      "subproject": "",
+      "category": "報告",
+      "status": "本機",
+      "sensitivity": "內部",
+      "date": "2026-11-01",
+      "url": "",
+      "desc": "How the demo content is laid out, and how vault fields work.",
+      "tags": [],
+      "related": []
+    },
+    "docs/reports/2026-11-15-quarterly-ops-review.html": {
+      "id": 2,
+      "title": "Quarterly ops review",
+      "project": "reports",
+      "subproject": "",
+      "category": "報告",
+      "status": "本機",
+      "sensitivity": "內部",
+      "date": "2026-11-15",
+      "url": "",
+      "desc": "",
+      "tags": [],
+      "related": []
+    },
+    "docs/api/demo-service.postman_environment.json": {
+      "id": 3,
+      "title": "Demo Service — staging",
+      "project": "api",
+      "subproject": "",
+      "category": "API",
+      "status": "本機",
+      "sensitivity": "內部",
+      "date": "2026-11-22",
+      "url": "",
+      "desc": "",
+      "tags": [],
+      "related": []
+    }
+  }
+}
