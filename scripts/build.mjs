@@ -21,6 +21,7 @@
 //     emit it (--server, or a wrangler.toml with a [[d1_databases]] binding): a static host would serve the file.
 //  DIST_DIR=<dir> builds somewhere other than dist/ (tests).
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { ROOT, CONTENT, DOCS, VAULT_FILE, NOTES_DIR, SENSITIVITIES, sensRank, loadCatalog, saveCatalog, syncCatalog, toRecord, gitHistory, PEOPLE_FIELDS, mountFiles, stripBlockedRefs, visibilityOf, sourceEnvName, tenantVaultFile } from './lib/catalog.mjs';
 
@@ -119,6 +120,35 @@ fs.cpSync(SITE, DIST, { recursive: true });
 // version the service worker's shell cache per build
 const SW = path.join(DIST, 'sw.js');
 if (fs.existsSync(SW)) fs.writeFileSync(SW, fs.readFileSync(SW, 'utf8').replaceAll('__BUILD__', Date.parse(builtAt).toString(36)));
+// Cache-busting for the shell: a CDN may stretch the browser TTL of .js/.css (Cloudflare's zone "Browser Cache TTL"
+// overrides Pages' max-age=0 and even _headers' no-cache), so a fresh index.html could run a stale app.js for hours.
+// Every shell URL carries ?v=<hash of site/>: index.html's script/stylesheet, and each relative module import, static or
+// dynamic (the module map is keyed by full URL, so one unversioned import would pin an old module). Unchanged site/ →
+// same hash → the browser cache still works across content-only deploys.
+const shellVersion = (() => {
+  const h = crypto.createHash('sha256');
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1)).forEach((e) => {
+    const f = path.join(dir, e.name);
+    if (e.isDirectory()) walk(f);
+    else h.update(path.relative(SITE, f)).update('\0').update(fs.readFileSync(f)).update('\0');
+  });
+  walk(SITE);
+  return h.digest('hex').slice(0, 10);
+})();
+const versionImports = (src) => src.replace(/((?:\bfrom|\bimport\s*\()\s*)(['"])(\.{1,2}\/[^'"?#]+\.js)\2/g, `$1$2$3?v=${shellVersion}$2`);
+(function stampShell(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name);
+    if (e.isDirectory()) stampShell(f);
+    else if (e.name.endsWith('.js') && e.name !== 'sw.js' && e.name !== 'vault-frame.js') fs.writeFileSync(f, versionImports(fs.readFileSync(f, 'utf8')));
+  }
+})(DIST);
+{
+  const INDEX = path.join(DIST, 'index.html');
+  if (fs.existsSync(INDEX)) {
+    fs.writeFileSync(INDEX, fs.readFileSync(INDEX, 'utf8').replace(/(\b(?:src|href)=")([\w./-]+\.(?:js|css))(")/g, `$1$2?v=${shellVersion}$3`));
+  }
+}
 const DIST_DOCS = path.join(DIST, 'docs');
 fs.cpSync(DOCS, DIST_DOCS, {
   recursive: true,

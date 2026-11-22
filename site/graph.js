@@ -304,7 +304,7 @@ function ensureCss() {
   if (document.querySelector('link[data-graph-css]')) return;
   const l = document.createElement('link');
   l.rel = 'stylesheet';
-  l.href = new URL('graph.css', import.meta.url).href;
+  l.href = new URL('graph.css' + new URL(import.meta.url).search, import.meta.url).href; // keep the build's ?v= cache-buster
   l.dataset.graphCss = '';
   document.head.appendChild(l);
 }
