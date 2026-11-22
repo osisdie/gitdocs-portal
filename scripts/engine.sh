@@ -15,7 +15,7 @@ case "${1:-}" in
   update)
     sha=$(fetch "${2:-main}")
     mapfile -t P < <(paths "$sha")
-    git rm -r -q --ignore-unmatch -- "${P[@]}" >/dev/null   # drop files that upstream deleted
+    git rm -r -q -f --ignore-unmatch -- "${P[@]}" >/dev/null   # drop files that upstream deleted (update overwrites them anyway)
     git checkout "$sha" -- "${P[@]}"
     echo "$sha" > .engine-ref
     git add -- .engine-ref "${P[@]}"
