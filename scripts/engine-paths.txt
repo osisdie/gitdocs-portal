@@ -1,10 +1,10 @@
 # Engine-owned paths. A content repo (docs + vault) vendors these from gitdocs-portal and must not edit them;
 # `npm run engine:update` copies them from upstream, `npm run engine:check` (CI) fails when they drift.
+# test/ stays upstream: engine tests run in this repo's CI; content repos only build and deploy.
 site/
 scripts/
 functions/
 migrations/
-test/
 wrangler.toml.example
 package.json
 LICENSE
