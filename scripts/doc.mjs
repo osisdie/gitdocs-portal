@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Catalog management CLI.  npm run doc -- <command> …
-import { loadCatalog, saveCatalog, syncCatalog, toRecord, findById, README_FIELDS, SENSITIVITIES, PEOPLE_FIELDS, INDEX_PROJECT, VISIBILITIES, aliasProblem } from './lib/catalog.mjs';
-import { parseQuery, matchDoc, QUERY_HELP } from '../site/query.js';
+import { execFileSync } from 'node:child_process';
+import { loadCatalog, saveCatalog, syncCatalog, toRecord, findById, gitHistory, README_FIELDS, SENSITIVITIES, PEOPLE_FIELDS, INDEX_PROJECT, VISIBILITIES, aliasProblem } from './lib/catalog.mjs';
+import { parseQuery, matchDoc, usesMe, usesHistory, QUERY_HELP } from '../site/query.js';
 
 const USAGE = `用法：npm run doc -- <指令>
 
@@ -70,7 +71,15 @@ switch (cmd) {
   case 'ls': {
     const { items } = load();
     const q = parseQuery(args.join(' '));
-    const rows = items.map((it) => ({ r: toRecord(it), m: matchDoc(toRecord(it), q, it.text) })).filter((x) => x.m)
+    // `me` = git config user.email; created / updated need each doc's git history (read only when asked for)
+    let me = '';
+    if (usesMe(q)) {
+      try { me = execFileSync('git', ['config', 'user.email'], { encoding: 'utf8' }).trim().toLowerCase(); } catch { /* unset */ }
+      if (!me) die('查詢用到 me，但 git config user.email 沒有設定；請改寫 email，或先設定 git config user.email');
+    }
+    const withHist = usesHistory(q);
+    const rec = (it) => (withHist ? { ...toRecord(it), history: gitHistory(it.rel, 20, it.loc) } : toRecord(it));
+    const rows = items.map((it) => { const r = rec(it); return { r, m: matchDoc(r, q, it.text, { me }) }; }).filter((x) => x.m)
       .sort((a, b) => b.r.date.localeCompare(a.r.date) || b.r.id - a.r.id);
     console.log(`${fit('編號', 8)}${fit('狀態', 8)}${fit('機敏', 8)}${fit('專案', 18)}${fit('分類', 12)}${fit('日期', 12)}標題`);
     for (const { r } of rows) console.log(`${fit(String(r.id).padStart(7, '0'), 8)}${fit(r.status, 8)}${fit(r.sensitivity, 8)}${fit(r.project + (r.subproject ? '/' + r.subproject : ''), 18)}${fit(r.category, 12)}${fit(r.date, 12)}${r.title}`);

@@ -253,6 +253,10 @@ Roles are per top-level project (`*` = every project). Owners come from `OWNER_E
    npx --yes wrangler@4.166.0 d1 migrations apply gitdocs --remote   # later: npm run db:migrate
    ```
 
+   Migrations: `0001_init` (users, roles, workflow state, audit), `0002_vault` (web vault), `0003_filters`
+   (project-shared saved filters). Existing deployments pick up new ones on the next `npm run deploy` or
+   `npm run db:migrate`.
+
 3. **Variables and secrets** (`[vars]` in `wrangler.toml`, secrets with `wrangler pages secret put`):
 
    | Name | Kind | Value |

@@ -20,6 +20,7 @@ Status: accepted 2026-11-22. This is the contract the UI (`site/`) and the serve
 - [Confidential documents](#confidential-documents)
 - [Home page](#home-page)
 - [Document page](#document-page)
+- [Saved filters and CSV export](#saved-filters-and-csv-export)
 - [Profile menu, theme, PWA, RWD](#profile-menu-theme-pwa-rwd)
 - [Admin page](#admin-page)
 - [i18n](#i18n)
@@ -210,9 +211,14 @@ synced       (path TEXT PRIMARY KEY, at TEXT NOT NULL)               -- last doc
 vault_secrets  (name TEXT PRIMARY KEY, iv TEXT NOT NULL, ct TEXT NOT NULL, note TEXT, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL)
 vault_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, iv TEXT, ct TEXT, note TEXT,
                 action TEXT NOT NULL /* create|update|delete */, actor TEXT NOT NULL, at TEXT NOT NULL)   -- append-only
+-- 0003_filters.sql (DESIGN.md → Saved filters and CSV export)
+shared_filters (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL /* top-level */, name TEXT NOT NULL,
+                params TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (project, name))
 ```
 
-Migrations live in `migrations/NNNN_*.sql` (wrangler D1 migrations format). Timestamps are ISO-8601 UTC.
+Migrations live in `migrations/NNNN_*.sql` (wrangler D1 migrations format): `0001_init`, `0002_vault`,
+`0003_filters`. `npm run deploy` (scripts/deploy.sh) applies pending ones before the new functions go live; tests
+apply every file in order. Timestamps are ISO-8601 UTC.
 
 ## HTTP API
 
@@ -237,6 +243,9 @@ CSRF: every non-GET/HEAD `/api` request needs `Content-Type: application/json` (
 | `POST /api/users` | manager+ | body `{ email, name?, memberships: [{ project, role }] }` — managers only for their projects, only owners grant `*`; adds the email to the Access group; an existing account gets the rows merged. Owner → 201 `{ user }` (new) / 200 `{ user, existing: true }`. **Manager → always 201 `{ user: { email, memberships } }`** (their own rows only), so an invite never tells whether the account existed; a given name is applied only to an account without one |
 | `PATCH /api/users/:email` | manager+ / owner | body `{ name?, disabled? (owner only), memberships? }` — `memberships` is the desired set within the caller's reach: listed rows are upserted (`role: null` removes), rows the caller manages but did not list are removed, rows of other projects are untouched (managers: only rows for their projects) → `{ user }`. A manager gets the same 404 for a user without a membership they manage (owners included) as for a missing one; to add such a user, invite them |
 | `DELETE /api/users/:email` | owner | disables the user and removes the email from the Access group (a `PATCH` that removes a user's last membership also removes them from the group; adding one back re-adds them) |
+| `GET /api/filters[?project=]` | can view the project | project-shared saved filters of one project (a subproject means its top level; 404 for a project the caller cannot view or that does not exist) or, without `project`, of every project the caller can view (owners: all rows) → `[{ id, project, name, params, created_at, created_by_name, mine, canDelete }]`; never the creator's email |
+| `POST /api/filters` | manager+ of the project / owner | body `{ project, name, params }` (≤ 4 KB; name 1–60 chars; params ≤ 1000 chars, scoped with `p=<project[/sub]>`, may not name another project in `q`, no `page`) → 201 new / 200 replaced (same project + name); ≤ 100 per project; history `filter.create` / `filter.update` |
+| `DELETE /api/filters/:id` | manager+ of the filter's project / owner | → `{ ok: true }`; history `filter.delete`; 404 when the caller cannot view the project |
 | `GET /api/audit?limit=` | owner | `{ history: [...], vault: [...] }` — newest first, `limit` ≤ 500 (default 100) |
 | `GET /api/export/state?since=` | owner | `{ at, docs: [doc_state rows], notes: [...] }` changed since an ISO time |
 
@@ -263,7 +272,7 @@ The rules are **default-deny**:
 
 | Path | Rule |
 |---|---|
-| `SHELL_FILES` in `functions/_lib/gate.js`: `/`, `/index.html`, `/app.js`, `/app.css`, `/query.js`, `/model.js`, `/api.js`, `/admin.js`, `/graph.js`, `/graph.css`, `/vault.js`, `/vault-core.js`, `/vault-frame.js`, `/sw.js`, `/manifest.webmanifest`, `/robots.txt`, `/i18n.js`, `/icons/<file>`, `/i18n/<file>` | any known user (`/` and `/index.html` also get the shell CSP) |
+| `SHELL_FILES` in `functions/_lib/gate.js`: `/`, `/index.html`, `/app.js`, `/app.css`, `/query.js`, `/model.js`, `/api.js`, `/admin.js`, `/graph.js`, `/graph.css`, `/vault.js`, `/vault-core.js`, `/vault-frame.js`, `/sw.js`, `/manifest.webmanifest`, `/robots.txt`, `/i18n.js`, `/filters.js`, `/liststate.js`, `/icons/<file>`, `/i18n/<file>` | any known user (`/` and `/index.html` also get the shell CSP) |
 | `/catalog.json` | rewritten: `site.people` trimmed to the caller's visible people; only docs in visible projects (memberships + public projects); `projects` and `filters` trimmed accordingly; `related` / `supersedes` links to invisible docs removed; adds `"server": true` |
 | `/search-index.json` | rewritten: only rows whose doc is visible |
 | `/docs/<path>` (also the extensionless and `…/index.html` forms) | 403 unless **every** file the Pages asset server could answer the URL with is readable: `/x/` → `x/index.html`; `/x/index` → itself; otherwise `x`, then `x.html` (wrangler `generateHandler`, auto-trailing-slash; forms that only redirect come back through the gate). A doc is readable when its project is visible, and for `機密`+ docs when editor+ ([Confidential documents](#confidential-documents)); unknown files under `/docs/` → owner only, including an extensionless `x` that would be served ahead of doc `x.html` (the gate asks the asset server: `/x.html` is served only when such a file exists, otherwise it redirects to `/x`) and a file at the path of an `offline` doc; the middleware sets `Content-Security-Policy: sandbox …`, `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-cache` itself (`_headers` rules match the raw path and are only a static-mode fallback) |
@@ -404,6 +413,62 @@ Route `#/doc/<id>`, MantisBT-style with the content as the main thing:
   source repo", `host` rows: "managed by the operator") and reveal any row through the masked dialog (page form of
   `POST /api/vault/reveal`). A value lives only in the open form (cleared and re-masked on save / cancel) and in the
   dialog (dropped on close).
+
+## Saved filters and CSV export
+
+The list view's saved-filters bar (`site/filters.js`) shows three kinds of filters; a filter is the list's URL query
+(`URLSearchParams` string, without `page`), and the chip of the one matching the current list is highlighted
+(`aria-current`; a filter saved without a sort matches any sort).
+
+| Kind | Stored in | Who saves / deletes | Seen by |
+|---|---|---|---|
+| Catalog | `catalog.json` `filters` (`{ name, query }`, in git) | maintainers, by editing the catalog | everyone (server mode: only filters whose `p:` conditions name visible projects) |
+| Personal | static: `localStorage['gitdocs:filters']`; server: `prefs.savedFilters` (`PUT /api/me/prefs`) only | the user | the user, on every device in server mode |
+| Shared | D1 `shared_filters` (`/api/filters`) | managers of the project, owners | everyone who can view the project; the whole-portal list shows the shared filters of every visible project, labelled with the project |
+
+- Personal limits (the prefs object is capped at 8 KB on the server): ≤ 30 filters, name ≤ 60 characters, params ≤
+  1000 characters, and the whole prefs object must still fit; the save dialog says which limit was hit. A name that
+  exists already replaces that filter. Older entries beyond the limits stay readable.
+- First server-mode load of an account (`prefs.savedFilters` not set yet): this browser's static-mode filters are
+  copied into prefs once (server copy first, no duplicate names, invalid entries dropped) and then removed from
+  localStorage, so a second identity on the same browser does not inherit them.
+- localStorage is shared by every Access identity on a browser and is not keyed by account, so in server mode it only
+  mirrors UI-only prefs (`theme`, `lang`, `listPer`): saved filters and focus projects name projects and people of a
+  tenant and live in the server copy alone (`site/api.js` `LOCAL_SAFE`).
+- Shared filter params may only carry list state (`p`, `q`, `sort`, `per`); `p` must be the filter's project and no
+  comma alternative of a `project:` condition in `q` may name another project. A creator the caller may not see
+  (removed from the project, another tenant) is listed with `created_by_name: null`.
+- Saving opens a dialog (name; for managers of the project in scope also "just me / everyone in <project>"). Sharing
+  needs a project in scope, so the stored params are always scoped to it. Results are announced in a polite live region
+  and shown in the bar.
+- **CSV export** downloads every filtered and sorted row (all pages), with the columns the list shows: RFC 4180, UTF-8
+  BOM (Excel opens CJK text correctly), CRLF; fields with `,` `"` CR LF are quoted, inner quotes doubled, and cells
+  starting with `=` `+` `-` `@` TAB or CR get a leading `'` (spreadsheet formula injection). Values: padded id, status /
+  category / sensitivity as labels in the UI language, people as display names, dates as `YYYY-MM-DD`, project path,
+  keywords joined with `; `. The export holds nothing the list does not show: unknown column keys pass through only
+  for unrestricted docs and vault fields never appear. Filename `docs-<project|all>-<YYYYMMDD>.csv`.
+
+## Document list: search, filters, sort, paging
+
+- One query language for the search box, the advanced filter panel and `npm run doc -- ls` (`site/query.js`; the
+  full syntax is in its header comment and the `?` help). Beyond words / phrases / `-exclude` / fields:
+  people `reporter:` (`rep:`), `assignee:` (`asg:`, `a:`), `reviewer:` (`rev:`) take an email, `@domain`, part of a
+  display name, `me` or `none`; a comma means any of (`s:open,in-review`, `assignee:me,none`), repeating a field
+  means AND; `tag:a,b` = any, `tag:a+b` = all; `created…` / `updated…` take the date operators
+  (`created>=-7d`, `updated:this-month`; also `today`, `this-year`). An enum value that names a stored value, slug or
+  English label matches exactly, anything else partially. created = `created`, else the oldest of the (≤ 20) listed
+  commits, else the doc date; updated = the newer of server `updated_at` and the last commit. The CLI resolves `me`
+  from `git config user.email` and reads git history only when the query uses created / updated.
+- The **advanced filter panel** (`<details>`, open/closed remembered per browser in `localStorage`
+  `gitdocs:advOpen`) shows status / category / sensitivity / format as toggle chips, tags with any / all, reporter /
+  assignee / reviewer (Me in server mode, (none), people in scope), a date field (doc / created / updated) with
+  presets (7 / 30 days, this month) or from–to, and the remaining text. It is a view of `q=`: changing it writes
+  canonical tokens (`site/liststate.js`), typing a query updates it; tokens it cannot show (negations, partial
+  values, repeated fields) stay in the text box verbatim.
+- URL: `#/list?p=&q=&sort=status:asc,date:desc&per=25|50|100|all&page=<n>`. Header click sorts, Shift+click (or
+  Shift+Enter) adds / flips / removes a secondary sort; `aria-sort` marks only the primary. Page size defaults to 50
+  and is saved in prefs `listPer`; filter or sort changes go back to page 1. Old links (`c=`, `s=`, `sv=`, `ty=`,
+  `k=`, `sort=&dir=`) are translated into this form once (history `replaceState`).
 
 ## Profile menu, theme, PWA, RWD
 

@@ -4,7 +4,10 @@
 // Server mode (GET /api/me → 200): workflow state from D1 is merged into the docs, editors change it inline,
 // notes and an audit trail appear on doc pages, and the vault is revealed by the server per role.
 // UI text goes through site/i18n.js (t / th); stored enum values are displayed through label().
-import { parseQuery, matchDoc, needsBody, queryHelp, SENSITIVITIES, sensRank } from './query.js';
+import { parseQuery, matchDoc, needsBody, queryHelp, SENSITIVITIES, sensRank, docCreated, docUpdated } from './query.js';
+import {
+  panelFromQuery, queryFromPanel, emptyPanel, panelCount, toggleTag, ENUM_KEYS, PANEL_PEOPLE, DATE_FIELDS, translateLegacy,
+  parseSort, sortString, clickSort, sortComparator, PER_OPTIONS, parsePer, perParam, paginate, pageList, capQuery, Q_MAX } from './liststate.js';
 import { mask as vaultMask, lock as vaultLock, isUnlocked as vaultUnlocked, revealDialog, revealSecretDialog, useServer as vaultUseServer, noRole } from './vault.js';
 import { NAME_RE } from './vault-core.js';
 import {
@@ -138,21 +141,44 @@ async function ensureBody() {
   bodyLoading ||= fetch('search-index.json').then((r) => r.json()).then((rows) => { BODY = new Map(rows.map((r) => [r.id, r.t])); });
   await bodyLoading;
 }
+/** Escaped `text` with every search term wrapped in <mark>: matched on the raw text, so entities and earlier marks
+ *  are never split (a search for "amp" or "mark" used to garble `&amp;`). */
 function highlight(text, ts) {
-  let out = esc(text);
-  for (const term of ts) {
-    const re = new RegExp(esc(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    out = out.replace(re, (m) => `<mark>${m}</mark>`);
+  const terms = [...new Set((ts || []).map(String).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const raw = String(text ?? '');
+  if (!terms.length) return esc(raw);
+  const re = new RegExp(terms.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  let out = '', last = 0, m;
+  while ((m = re.exec(raw))) {
+    if (!m[0]) { re.lastIndex++; continue; }
+    out += esc(raw.slice(last, m.index)) + `<mark>${esc(m[0])}</mark>`;
+    last = m.index + m[0].length;
   }
-  return out;
+  return out + esc(raw.slice(last));
 }
 
 // ---------- shared fragments ----------
+// One parse of q per render, and one toggled query per distinct term: a list renders chips for every row × tag.
+let chipMemo = { q: null, on: null, toggled: new Map() };
+function chipState(q) {
+  if (chipMemo.q !== q) chipMemo = { q, on: new Set(panelFromQuery(q).tag.map((x) => x.toLowerCase())), toggled: new Map() };
+  return chipMemo;
+}
 function chips(d, params, max = 8) {
-  const ks = new Set(params ? params.getAll('k') : []);
+  const q = params?.get('q') || '';
+  const memo = chipState(q);
+  const on = memo.on;
+  const toggled = (term) => {
+    const k = term.toLowerCase();
+    if (!memo.toggled.has(k)) memo.toggled.set(k, toggleTag(q, term));
+    return memo.toggled.get(k);
+  };
   const mk = (term, cls) => {
-    const p = new URLSearchParams(params || ''); if (!ks.has(term)) p.append('k', term);
-    return `<a class="chip ${cls}${ks.has(term) ? ' on' : ''}" href="#/list?${p}">${cls === 'tag' ? '#' : ''}${esc(term)}</a>`;
+    const p = new URLSearchParams(params || '');
+    p.set('q', toggled(term)); p.delete('page');
+    if (!p.get('q')) p.delete('q');
+    const sel = on.has(term.toLowerCase());
+    return `<a class="chip ${cls}${sel ? ' on' : ''}" href="#/list?${esc(p.toString())}"${sel ? ` title="${th('list.remove')}"` : ''}>${cls === 'tag' ? '#' : ''}${esc(term)}</a>`;
   };
   const all = [...(d.tags || []).map((x) => mk(x, 'tag')), ...(d.keywords || []).map((x) => mk(x, 'kw'))];
   return all.length ? `<div class="chips">${all.slice(0, max).join('')}${all.length > max ? `<span class="dim">+${all.length - max}</span>` : ''}</div>` : '';
@@ -220,63 +246,172 @@ function viewHome(params) {
 }
 
 // ---------- list ----------
-async function viewList(params) {
+// Filters live in the query (q=): the advanced panel and the search box edit the same string (site/liststate.js).
+const ADV_KEY = 'gitdocs:advOpen';
+const NARROW = () => window.matchMedia('(max-width: 720px)').matches;
+function advOpen() {
+  try { const v = localStorage.getItem(ADV_KEY); if (v !== null) return v === '1'; } catch { /* storage blocked */ }
+  return !NARROW();
+}
+const setAdvOpen = (open) => { try { localStorage.setItem(ADV_KEY, open ? '1' : '0'); } catch { /* storage blocked */ } };
+let filtersMod;          // site/filters.js (saved filters, CSV export); null when it is not there
+const loadFiltersMod = async () => {
+  if (filtersMod === undefined) {
+    filtersMod = await import('./filters.js').catch(() => null);
+    filtersMod?.initFilters?.({ data: DATA });
+  }
+  return filtersMod;
+};
+let listFocus = null;    // { fid, caret } to restore after a panel / sort change re-renders the list
+let listPageKey = '';    // list state minus page: a page change scrolls back to the top of the results
+const listCtx = () => ({ me: ME?.email || '', name: displayName });
+const tog = (group, v, html, on, type = 'checkbox', name = '') => `<label class="tog"><input type="${type}"${name ? ` name="${name}"` : ` data-g="${group}"`} value="${esc(v)}" data-fid="${esc(`${group}:${v}`)}"${on ? ' checked' : ''}><span>${html}</span></label>`;
+/** Multi-select as toggle chips: every value present in scope (plus selected ones). */
+function msField(key, legend, values, cur, lab) {
+  const vals = [...new Set([...values, ...cur])];
+  if (!vals.length) return '';
+  return `<fieldset class="ms"><legend>${legend}</legend><div class="togs">${vals.map((v) => tog(key, v, esc(lab(v)), cur.includes(v))).join('')}</div></fieldset>`;
+}
+/** Toggle chips for fixed + selected values, and an "add" select for the other candidates (tags, people). */
+function pickField(key, legend, legendText, fixed, cur, options, lab, extra = '') {
+  const shown = [...fixed.map(([v]) => v), ...cur.filter((v) => !fixed.some(([f]) => f === v))];
+  const text = (v) => fixed.find(([f]) => f === v)?.[1] ?? lab(v);
+  const more = options.filter((v) => !shown.includes(v));
+  if (!shown.length && !more.length) return '';
+  return `<fieldset class="ms"><legend>${legend}</legend>${extra}<div class="togs">${shown.map((v) => tog(key, v, esc(text(v)), cur.includes(v))).join('')}
+    ${more.length ? `<select data-add="${key}" data-fid="add:${key}" aria-label="${esc(t('flt.addTo', { field: legendText }))}">${opt('', '', t('flt.add'))}${more.map((v) => opt(v, '', lab(v))).join('')}</select>` : ''}</div></fieldset>`;
+}
+function advPanel(st, base) {
+  const inBase = (field, v) => base.some((d) => d[field] === v);
+  const tags = uniq(base.flatMap((d) => [...(d.tags || []), ...(d.keywords || [])]));
+  const people = (k) => uniq(base.map((d) => String(d[k] || '').trim().toLowerCase())).sort((a, b) => displayName(a).localeCompare(displayName(b), 'zh-Hant'));
+  const personFixed = [...(ME ? [['me', t('flt.me')]] : []), ['none', t('flt.none')]];
+  const personField = (k) => (base.some((d) => d[k]) || st[k].length
+    ? pickField(k, th(`col.${k}`), t(`col.${k}`), personFixed, st[k], people(k), displayName) : '');
+  const mode = `<div class="tagmode" role="radiogroup" aria-label="${esc(t('flt.tagMode'))}"><span class="dim">${th('flt.tagMode')}</span>
+    ${tog('tagmode', 'any', th('flt.tagAny'), st.tagMode !== 'all', 'radio', 'tagmode')}${tog('tagmode', 'all', th('flt.tagAll'), st.tagMode === 'all', 'radio', 'tagmode')}</div>`;
+  const presets = ['', '7d', '30d', 'month'];
+  const preset = st.datePreset === 'custom' ? '' : st.datePreset;
+  const n = panelCount(st);
+  return `<details class="adv" id="adv"${advOpen() ? ' open' : ''}>
+    <summary><span>${th('flt.panel')}</span> <span class="adv-n${n ? ' on' : ''}">${th('flt.active', { n })}</span></summary>
+    <div class="adv-body">
+      ${msField('status', th('col.status'), DATA.statuses.filter((s) => inBase('status', s)), st.status, L.st)}
+      ${msField('cat', th('col.category'), DATA.categories.filter((c) => inBase('category', c)), st.cat, L.cat)}
+      ${msField('sens', th('col.sens'), SENSITIVITIES.filter((s) => inBase('sensitivity', s)), st.sens, L.sv)}
+      ${msField('type', th('col.type'), uniq(base.map((d) => d.type)), st.type, (v) => v)}
+      ${pickField('tag', th('flt.tags'), t('flt.tags'), [], st.tag, tags, (v) => v, mode)}
+      ${personField('reporter')}${personField('assignee')}${personField('reviewer')}
+      <fieldset class="ms dates"><legend>${th('flt.date')}</legend>
+        <label class="sub">${th('flt.dateField')}<select data-date="field" data-fid="date:field">${DATE_FIELDS.map((f) => opt(f, st.dateField, t(`flt.field.${f}`))).join('')}</select></label>
+        <div class="togs" role="radiogroup" aria-label="${esc(t('flt.date'))}">${presets.map((v) => tog('dpreset', v, th(`flt.preset.${v || 'any'}`), preset === v, 'radio', 'dpreset')).join('')}</div>
+        <div class="range"><label class="sub">${th('flt.from')}<input type="date" data-date="from" data-fid="date:from" value="${esc(st.from)}"></label>
+          <label class="sub">${th('flt.to')}<input type="date" data-date="to" data-fid="date:to" value="${esc(st.to)}"></label></div>
+      </fieldset>
+      <label class="sub adv-text">${th('flt.text')}<input type="search" data-text data-fid="text" value="${esc(st.rest)}" placeholder="${esc(t('flt.textHint'))}" autocomplete="off" spellcheck="false"></label>
+    </div></details>`;
+}
+function readPanel(box) {
+  const st = emptyPanel();
+  for (const k of [...ENUM_KEYS, 'tag', ...PANEL_PEOPLE]) st[k] = [...box.querySelectorAll(`input[data-g="${k}"]:checked`)].map((i) => i.value);
+  st.tagMode = box.querySelector('input[name="tagmode"]:checked')?.value || 'any';
+  st.dateField = box.querySelector('[data-date="field"]').value;
+  st.datePreset = box.querySelector('input[name="dpreset"]:checked')?.value || '';
+  st.from = box.querySelector('[data-date="from"]').value;
+  st.to = box.querySelector('[data-date="to"]').value;
+  st.rest = box.querySelector('[data-text]').value;
+  return st;
+}
+function pager(pg, params) {
+  if (pg.pages <= 1) return '';
+  const href = (n) => { const sp = new URLSearchParams(params); if (n > 1) sp.set('page', n); else sp.delete('page'); return `#/list?${sp}`; };
+  const step = (n, text, key, off) => (off ? `<span class="pg-btn off" aria-hidden="true">${text}</span>`
+    : `<a class="pg-btn" href="${href(n)}" aria-label="${esc(t(key))}" title="${esc(t(key))}">${text}</a>`);
+  return `<nav class="pager" aria-label="${esc(t('pg.nav'))}">
+    ${step(1, '«', 'pg.first', pg.page === 1)}${step(pg.page - 1, '‹', 'pg.prev', pg.page === 1)}
+    ${pageList(pg.page, pg.pages).map((x) => (x === '…' ? '<span class="pg-gap" aria-hidden="true">…</span>'
+      : x === pg.page ? `<span class="pg-btn on" aria-current="page">${x}</span>`
+        : `<a class="pg-btn" href="${href(x)}" aria-label="${esc(t('pg.page', { page: x }))}">${x}</a>`)).join('')}
+    ${step(pg.page + 1, '›', 'pg.next', pg.page === pg.pages)}${step(pg.pages, '»', 'pg.last', pg.page === pg.pages)}</nav>`;
+}
+/** Legacy saved-filter strip, used only while site/filters.js is missing. */
+function savedFallback(p, q, curQuery) {
+  const local = lsGet();
+  return `<section class="saved" aria-label="${th('list.savedFilters')}">
+      <span class="dim">${th('list.filtersLabel')}</span>
+      ${DATA.filters.map((sf) => `<a class="chip saved-chip${q === sf.query ? ' on' : ''}" href="${scopeLink('list', p, { q: sf.query })}">${esc(sf.name)}</a>`).join('')}
+      ${local.map((sf, i) => `<span class="chip saved-chip local${curQuery === sf.params ? ' on' : ''}"><a href="#/list?${esc(sf.params)}">${esc(sf.name)}</a><button type="button" data-del="${i}" aria-label="${th('list.deleteFilter', { name: sf.name })}">×</button></span>`).join('')}
+      ${q ? `<button type="button" id="save" class="linkish">${th('list.saveFilter')}</button>` : ''}
+    </section>`;
+}
+async function viewList(params, seq = renderSeq) {
+  const legacy = translateLegacy(params);
+  if (legacy) { params = legacy; history.replaceState(null, '', `#/list${params.toString() ? `?${params}` : ''}`); }
+  const capped = capQuery(params.get('q') || '');
+  if (capped.cut) { params = new URLSearchParams(params); params.set('q', capped.q); history.replaceState(null, '', `#/list?${params}`); }
   const q = params.get('q') || '';
   if (qInput.value !== q && document.activeElement !== qInput) qInput.value = q;
   const p = params.get('p') || '';
-  const f = { c: params.get('c') || '', s: params.get('s') || '', sv: params.get('sv') || '', ty: params.get('ty') || '' };
-  const ks = params.getAll('k');
   const pq = parseQuery(q);
-  const sort = params.get('sort') || (pq.terms.length ? 'score' : 'date');
-  const dir = params.get('dir') || (['title', 'project', 'assignee', 'reviewer'].includes(sort) ? 'asc' : 'desc');
+  const spec = parseSort(params.get('sort'), pq.terms.length ? 'score' : 'date');
+  const per = parsePer(params.get('per'), getPrefs().listPer);
   if (needsBody(pq)) await ensureBody();
+  const fm = await loadFiltersMod();
+  if (seq !== renderSeq) return;
   const highlightTerms = pq.terms;
+  const ctx = listCtx();
 
   const base = scoped(p);
-  let rows = base.filter((d) => (!f.c || d.category === f.c) && (!f.s || d.status === f.s) && (!f.sv || d.sensitivity === f.sv)
-    && (!f.ty || d.type === f.ty) && ks.every((k) => (d.tags || []).includes(k) || (d.keywords || []).includes(k)));
-  rows = rows.map((d) => ({ d, m: matchDoc(d, pq, BODY ? (BODY.get(d.id) || '') : '') })).filter((r) => r.m);
-  const key = {
-    id: (r) => r.d.id, date: (r) => (r.d.updated_at || r.d.date) + pad(r.d.id), title: (r) => r.d.title, project: (r) => projOf(r.d),
-    category: (r) => r.d.category, status: (r) => r.d.status, sens: (r) => sensRank(r.d.sensitivity), score: (r) => r.m.score * 1e8 + Number(r.d.date.replace(/-/g, '')),
-    assignee: (r) => (r.d.assignee ? displayName(r.d.assignee) : '￿'), reviewer: (r) => (r.d.reviewer ? displayName(r.d.reviewer) : '￿'),
-  }[sort] || ((r) => r.d.date);
-  rows.sort((a, b) => { const x = key(a), y = key(b); const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'zh-Hant'); return dir === 'asc' ? c : -c; });
+  const rows = base.map((d) => ({ d, m: matchDoc(d, pq, BODY ? (BODY.get(d.id) || '') : '', ctx) })).filter((r) => r.m);
+  const person = (k) => (r) => (r.d[k] ? displayName(r.d[k]) : '￿');
+  rows.sort(sortComparator(spec, {
+    id: (r) => r.d.id, date: (r) => (r.d.updated_at || r.d.date) + pad(r.d.id), created: (r) => docCreated(r.d) + pad(r.d.id),
+    updated: (r) => docUpdated(r.d) + pad(r.d.id), title: (r) => r.d.title, project: (r) => projOf(r.d), category: (r) => r.d.category,
+    status: (r) => r.d.status, sens: (r) => sensRank(r.d.sensitivity), type: (r) => r.d.type || '',
+    score: (r) => r.m.score * 1e8 + Number(String(r.d.date).replace(/-/g, '')),
+    reporter: person('reporter'), assignee: person('assignee'), reviewer: person('reviewer'),
+  }));
+  const pg = paginate(rows.length, params.get('page'), per);
+  const pageRows = rows.slice(pg.start, pg.end);
+  const st = panelFromQuery(q);
 
   const showAssignee = base.some((d) => d.assignee), showReviewer = base.some((d) => d.reviewer);
-  const sel = (name, text, values, cur, lab = (v) => v) => `<label>${text}<select data-f="${name}">${opt('', cur, t('list.any'))}${values.map((v) => opt(v, cur, lab(v))).join('')}</select></label>`;
-  const thSort = (k, text, cls = '') => `<th class="${cls}" data-sort="${k}"${sort === k ? ` aria-sort="${dir === 'asc' ? 'ascending' : 'descending'}"` : ''}>${text}</th>`;
-  const anyFilter = q || ks.length || Object.values(f).some(Boolean);
-  const kwOptions = uniq(base.flatMap((d) => [...(d.tags || []), ...(d.keywords || [])])).filter((k) => !ks.includes(k));
-  const local = lsGet();
-  const curQs = (() => { const c = new URLSearchParams(params); c.delete('sort'); c.delete('dir'); return c.toString(); })();
+  const dirLabel = (d) => t(d === 'asc' ? 'flt.asc' : 'flt.desc');
+  const thSort = (k, text, cls = '') => {
+    const i = spec.findIndex((s) => s.key === k);
+    const aria = i === 0 ? ` aria-sort="${spec[0].dir === 'asc' ? 'ascending' : 'descending'}"` : '';
+    const s2 = i === 1 ? ` <span class="sort2" title="${esc(t('flt.sort2', { dir: dirLabel(spec[1].dir) }))}">${spec[1].dir === 'asc' ? '▲' : '▼'}<sub>2</sub><span class="vh"> (${th('flt.sort2', { dir: dirLabel(spec[1].dir) })})</span></span>` : '';
+    const s1 = i === 0 ? ` <span class="sort1" aria-hidden="true">${spec[0].dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    return `<th class="${cls}"${aria}><button type="button" class="th-sort" data-sort="${k}" data-fid="sort:${k}" title="${esc(t('flt.sortHint'))}">${text}${s1}${s2}</button></th>`;
+  };
   const SORTS = [['date', 'col.date'], ['id', 'col.id'], ['title', 'col.title'], ['status', 'col.status'], ['sens', 'col.sens'], ['project', 'col.project'],
     ...(pq.terms.length ? [['score', 'col.score']] : []), ...(showAssignee ? [['assignee', 'col.assignee']] : [])];
   const scopeNote = (p ? th('list.inProject', { project: projTitle(p) }) : '') + (q ? th('list.forQuery', { q }) : '');
+  const curQuery = (() => { const c = new URLSearchParams(); for (const k of ['p', 'q', 'sort', 'per']) if (params.get(k)) c.set(k, params.get(k)); return c.toString(); })();
+  const primary = `${spec[0].key}:${spec[0].dir}`;
+  const shown = rows.length ? th('pg.showing', { from: pg.start + 1, to: pg.end, n: rows.length, total: base.length }) : th('list.showing', { shown: 0, n: base.length });
+  const pagerHtml = pager(pg, params);
+  // CSV columns = the visible table columns; site/filters.js formats each key the way the list shows it
+  const columns = [['id', 'col.id'], ['status', 'col.status'], ['sensitivity', 'col.sens'], ['project', 'col.project'], ['category', 'col.category'],
+    ['title', 'col.title'], ...(showAssignee ? [['assignee', 'col.assignee']] : []), ...(showReviewer ? [['reviewer', 'col.reviewer']] : []),
+    ME ? ['updated', 'col.updated'] : ['date', 'col.date'], ['type', 'col.type']].map(([key, l]) => ({ key, label: t(l) }));
 
   app.innerHTML = `
-    <section class="saved" aria-label="${th('list.savedFilters')}">
-      <span class="dim">${th('list.filtersLabel')}</span>
-      ${DATA.filters.map((sf) => `<a class="chip saved-chip${q === sf.query && !ks.length ? ' on' : ''}" href="${scopeLink('list', p, { q: sf.query })}">${esc(sf.name)}</a>`).join('')}
-      ${local.map((sf, i) => `<span class="chip saved-chip local${curQs === sf.params ? ' on' : ''}"><a href="#/list?${esc(sf.params)}">${esc(sf.name)}</a><button type="button" data-del="${i}" aria-label="${th('list.deleteFilter', { name: sf.name })}">×</button></span>`).join('')}
-      ${anyFilter ? `<button type="button" id="save" class="linkish">${th('list.saveFilter')}</button>` : ''}
-    </section>
-    <section class="filters" aria-label="${th('list.filters')}">
-      ${sel('c', th('col.category'), DATA.categories.filter((c) => base.some((d) => d.category === c)), f.c, L.cat)}
-      ${sel('s', th('col.status'), DATA.statuses.filter((s) => base.some((d) => d.status === s)), f.s, L.st)}
-      ${sel('sv', th('col.sens'), SENSITIVITIES.filter((s) => base.some((d) => d.sensitivity === s)), f.sv, L.sv)}
-      ${sel('ty', th('col.type'), uniq(base.map((d) => d.type)), f.ty)}
-      <label>${th('list.kwTag')}<select id="addk">${opt('', '', ks.length ? t('list.addAnother') : t('list.any'))}${kwOptions.map((k) => opt(k, '')).join('')}</select></label>
-      <label class="m-sort">${th('list.sort')}<select id="msort">${SORTS.flatMap(([k, l]) => [opt(`${k}:desc`, `${sort}:${dir}`, `${t(l)} ↓`), opt(`${k}:asc`, `${sort}:${dir}`, `${t(l)} ↑`)]).join('')}</select></label>
-    </section>
-    ${ks.length ? `<div class="chips active">${ks.map((k) => { const n = new URLSearchParams(params); const rest = ks.filter((x) => x !== k); n.delete('k'); rest.forEach((x) => n.append('k', x)); return `<a class="chip kw on" href="#/list?${n}" title="${th('list.remove')}">${esc(k)} ×</a>`; }).join('')}</div>` : ''}
+    ${fm?.savedFiltersHtml ? fm.savedFiltersHtml({ project: p, curQuery }) : savedFallback(p, q, curQuery)}
+    ${advPanel(st, base)}
     <div class="bar">
-      <span>${th('list.showing', { shown: rows.length, n: base.length })}${scopeNote}</span>
-      ${anyFilter ? `<button type="button" id="reset">${th('list.reset')}</button>` : ''}
+      <span>${shown}${scopeNote}${capped.cut ? ` <span class="dim small" role="status">${th('flt.qCut', { n: Q_MAX })}</span>` : ''}</span>
+      <span class="bar-tools">
+        <label class="m-sort">${th('list.sort')}<select id="msort" data-fid="msort">${SORTS.flatMap(([k, l]) => [opt(`${k}:desc`, primary, `${t(l)} ↓`), opt(`${k}:asc`, primary, `${t(l)} ↑`)]).join('')}</select></label>
+        <label class="per">${th('pg.per')}<select id="per" data-fid="per">${PER_OPTIONS.map((v) => opt(perParam(v), perParam(per), v ? String(v) : t('pg.all'))).join('')}</select></label>
+        ${fm?.exportCsvButtonHtml ? fm.exportCsvButtonHtml() : ''}
+        ${q ? `<button type="button" id="reset">${th('list.reset')}</button>` : ''}
+      </span>
     </div>
+    ${pagerHtml}
     ${rows.length ? `<div class="tbl-wrap"><table class="docs">
-      <thead><tr>${thSort('id', th('col.id'))}${thSort('status', th('col.status'), 'c-st')}${thSort('sens', th('col.sens'), 'c-sens')}${thSort('project', th('col.project'), 'c-proj')}${thSort('category', th('col.category'), 'c-cat')}${thSort('title', th('col.title'))}${showAssignee ? thSort('assignee', th('col.assignee'), 'c-who') : ''}${showReviewer ? thSort('reviewer', th('col.reviewer'), 'c-who') : ''}${thSort('date', th(ME ? 'col.updated' : 'col.date'), 'c-date')}<th class="c-type">${th('col.type')}</th></tr></thead>
-      <tbody>${rows.map(({ d, m }) => `
+      <thead><tr>${thSort('id', th('col.id'))}${thSort('status', th('col.status'), 'c-st')}${thSort('sens', th('col.sens'), 'c-sens')}${thSort('project', th('col.project'), 'c-proj')}${thSort('category', th('col.category'), 'c-cat')}${thSort('title', th('col.title'))}${showAssignee ? thSort('assignee', th('col.assignee'), 'c-who') : ''}${showReviewer ? thSort('reviewer', th('col.reviewer'), 'c-who') : ''}${thSort('date', th(ME ? 'col.updated' : 'col.date'), 'c-date')}${thSort('type', th('col.type'), 'c-type')}</tr></thead>
+      <tbody>${pageRows.map(({ d, m }) => `
         <tr class="st" style="${stStyle(d.status)}">
           <td class="id"><a href="#/doc/${d.id}">${pad(d.id)}</a></td>
           <td class="c-st">${statusChip(d.status)}</td>
@@ -291,28 +426,72 @@ async function viewList(params) {
           ${showReviewer ? `<td class="c-who" data-label="${th('col.reviewer')}">${who(d.reviewer)}</td>` : ''}
           <td class="c-date nowrap dim">${esc((d.updated_at || d.date || '').slice(0, 10))}</td>
           <td class="c-type type">${esc(d.type)}</td>
-        </tr>`).join('')}</tbody></table></div>` : `<p class="empty">${th('list.empty')}</p>`}`;
+        </tr>`).join('')}</tbody></table></div>` : `<p class="empty">${th('list.empty')}</p>`}
+    ${pagerHtml}`;
 
-  app.querySelectorAll('select[data-f]').forEach((s) => s.addEventListener('change', () => {
-    const n = new URLSearchParams(params); s.value ? n.set(s.dataset.f, s.value) : n.delete(s.dataset.f); go('list', n, true);
-  }));
-  $('#addk').addEventListener('change', (e) => { if (!e.target.value) return; const n = new URLSearchParams(params); n.append('k', e.target.value); go('list', n, true); });
-  $('#msort').addEventListener('change', (e) => { const [k, dr] = e.target.value.split(':'); const n = new URLSearchParams(params); n.set('sort', k); n.set('dir', dr); go('list', n, true); });
-  app.querySelectorAll('th[data-sort]').forEach((h) => h.addEventListener('click', () => {
-    const n = new URLSearchParams(params); const k = h.dataset.sort;
-    n.set('sort', k); n.set('dir', sort === k ? (dir === 'desc' ? 'asc' : 'desc') : (['title', 'project', 'assignee', 'reviewer'].includes(k) ? 'asc' : 'desc')); go('list', n, true);
-  }));
-  $('#reset')?.addEventListener('click', () => { qInput.value = ''; go('list', new URLSearchParams(p ? { p } : {}), true); });
-  $('#save')?.addEventListener('click', () => {
-    const name = (prompt(t('list.filterName'), q || ks.join(' ') || t('list.myFilter')) || '').trim();
-    if (!name) return;
-    const list = lsGet().filter((x) => x.name !== name).concat({ name, params: curQs });
-    if (!lsSet(list)) alert(t('err.storage'));
-    render();
+  // navigation that keeps focus on the control that caused it (the list is re-rendered from scratch)
+  const goList = (n, fid, caret) => { listFocus = fid ? { fid, caret } : null; go('list', n, true); };
+  const withQuery = (nq) => { const n = new URLSearchParams(params); if (nq) n.set('q', nq); else n.delete('q'); n.delete('page'); if (document.activeElement !== qInput) qInput.value = nq; return n; };
+  const box = $('#adv');
+  box.addEventListener('toggle', () => setAdvOpen(box.open));
+  const applyPanel = (stNext, fid, caret) => goList(withQuery(queryFromPanel(stNext)), fid, caret);
+  box.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el.matches('[data-text]')) return; // handled on input (debounced)
+    const next = readPanel(box);
+    if (el.dataset.add) { if (!el.value) return; next[el.dataset.add] = [...next[el.dataset.add], el.value]; }
+    if (el.name === 'dpreset') { next.from = ''; next.to = ''; }
+    if (el.dataset.date === 'from' || el.dataset.date === 'to') next.datePreset = '';
+    applyPanel(next, el.dataset.add ? `add:${el.dataset.add}` : el.dataset.fid || (el.name ? `${el.name}:${el.value}` : ''));
   });
-  app.querySelectorAll('button[data-del]').forEach((b) => b.addEventListener('click', () => {
-    const list = lsGet(); list.splice(Number(b.dataset.del), 1); lsSet(list); render();
-  }));
+  let textTimer;
+  const text = box.querySelector('[data-text]');
+  text.addEventListener('input', () => {
+    clearTimeout(textTimer);
+    textTimer = setTimeout(() => applyPanel(readPanel(box), 'text', text.selectionStart), 400);
+  });
+  text.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(textTimer); applyPanel(readPanel(box), 'text', text.selectionStart); } });
+
+  const setSort = (next, fid) => { const n = new URLSearchParams(params); n.set('sort', sortString(next)); n.delete('page'); goList(n, fid); };
+  app.querySelectorAll('button[data-sort]').forEach((b) => {
+    const k = b.dataset.sort;
+    b.addEventListener('click', (e) => setSort(clickSort(spec, k, e.shiftKey), `sort:${k}`));
+    // keyboard: Shift+Enter adds / toggles the secondary sort (a click synthesized from Enter may lack shiftKey)
+    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); setSort(clickSort(spec, k, true), `sort:${k}`); } });
+  });
+  $('#msort').addEventListener('change', (e) => { const [k, dr] = e.target.value.split(':'); setSort([{ key: k, dir: dr }], 'msort'); });
+  $('#per').addEventListener('change', (e) => {
+    const v = parsePer(e.target.value);
+    setPrefs({ listPer: v }).catch(() => { /* kept locally; the server copy catches up next time */ });
+    const n = new URLSearchParams(params); n.set('per', perParam(v)); n.delete('page'); goList(n, 'per');
+  });
+  $('#reset')?.addEventListener('click', () => { qInput.value = ''; const n = new URLSearchParams(params); n.delete('q'); n.delete('page'); go('list', n, true); });
+
+  if (fm?.bindSavedFilters) fm.bindSavedFilters(app, { project: p, curQuery, onApply: (query) => go('list', new URLSearchParams(query)) });
+  else {
+    $('#save')?.addEventListener('click', () => {
+      const name = (prompt(t('list.filterName'), q || t('list.myFilter')) || '').trim();
+      if (!name) return;
+      const list = lsGet().filter((x) => x.name !== name).concat({ name, params: curQuery });
+      if (!lsSet(list)) alert(t('err.storage'));
+      render();
+    });
+    app.querySelectorAll('button[data-del]').forEach((b) => b.addEventListener('click', () => {
+      const list = lsGet(); list.splice(Number(b.dataset.del), 1); lsSet(list); render();
+    }));
+  }
+  fm?.bindExportCsv?.(app, () => ({ rows: rows.map((r) => r.d), columns, project: p }));
+
+  // focus back on the control that triggered the re-render; a page change scrolls to the top of the results
+  if (listFocus) {
+    const { fid, caret } = listFocus;
+    listFocus = null;
+    const el = [...app.querySelectorAll('[data-fid]')].find((x) => x.dataset.fid === fid);
+    if (el) { el.focus({ preventScroll: true }); if (caret !== undefined && el.setSelectionRange) try { el.setSelectionRange(caret, caret); } catch { /* not a text field */ } }
+  }
+  const key = (() => { const c = new URLSearchParams(params); c.delete('page'); return c.toString(); })();
+  if (key === listPageKey && pg.pages > 1 && app.getBoundingClientRect().top < 0) app.scrollIntoView({ block: 'start' });
+  listPageKey = key;
 }
 
 // ---------- summary ----------
@@ -905,14 +1084,14 @@ async function render() {
   else if (view === 'project') viewProject(arg, params, seq);
   else if (view === 'doc') await viewDoc(arg, seq);
   else if (view === 'admin') await viewAdmin(params, seq);
-  else await viewList(params);
+  else await viewList(params, seq);
 }
 
 $('#proj').addEventListener('change', (e) => {
   const { view, params } = parseHash();
   const keep = SCOPED_VIEWS.includes(view);
   const n = keep ? new URLSearchParams(params) : new URLSearchParams();
-  n.delete('sec');
+  n.delete('sec'); n.delete('page');
   e.target.value ? n.set('p', e.target.value) : n.delete('p');
   go(keep ? view : 'list', n);
 });
@@ -924,7 +1103,7 @@ qInput.addEventListener('input', () => {
     const { view, params } = parseHash();
     const n = view === 'list' ? new URLSearchParams(params) : new URLSearchParams(params.get('p') ? { p: params.get('p') } : {});
     qInput.value ? n.set('q', qInput.value) : n.delete('q');
-    n.delete('sort'); n.delete('dir');
+    n.delete('sort'); n.delete('dir'); n.delete('page');
     go('list', n, view === 'list');
   }, 180);
 });

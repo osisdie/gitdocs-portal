@@ -281,6 +281,9 @@ npm run doc -- filter add '本週' 'after:-7d'
    npx --yes wrangler@4.166.0 d1 migrations apply gitdocs --remote   # 之後可用 npm run db:migrate
    ```
 
+   Migrations：`0001_init`（使用者、角色、流程狀態、稽核）、`0002_vault`（網頁 vault）、`0003_filters`
+   （專案共用的已存篩選）。已上線的站台在下次 `npm run deploy` 或 `npm run db:migrate` 時會自動套用新的 migration。
+
 3. **環境變數與 secret**（變數放 `wrangler.toml` 的 `[vars]`，secret 用 `wrangler pages secret put`）：
 
    | 名稱 | 種類 | 值 |

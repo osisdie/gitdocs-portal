@@ -13,7 +13,7 @@ const NOT_ENABLED = '尚未開通，請聯絡管理員';
 export const SHELL_FILES = new Set([
   '/', '/index.html', '/app.js', '/app.css', '/query.js', '/model.js', '/api.js', '/admin.js', '/graph.js',
   '/graph.css', '/vault.js', '/vault-core.js', '/vault-frame.js', '/sw.js', '/manifest.webmanifest', '/robots.txt',
-  '/i18n.js',
+  '/i18n.js', '/filters.js', '/liststate.js',
 ]);
 // one level of plain file names in the shell's asset folders (icons, UI translations)
 const SHELL_DIR_RE = /^\/(icons|i18n)\/[A-Za-z0-9][A-Za-z0-9._-]*$/;

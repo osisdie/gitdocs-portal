@@ -5,6 +5,7 @@ import { loadCatalog, docById, docByPath, publicOf, docSource } from './assets.j
 import { revealSecret, listSecrets, otherStores, webSeal, webVaultReady, validName, namespaceOf, VALUE_MAX } from './vault.js';
 import { syncAccessGroup } from './access-group.js';
 import { peopleMap, namesFor, checkName, nameTaken, visiblePeople } from './people.js';
+import { parseQuery } from '../../site/query.js';
 
 const LOGIN_EVERY_MS = 60 * 60 * 1000; // one `login` history row per user per hour is enough for "last seen"
 const PREFS_MAX = 8 * 1024;
@@ -28,6 +29,9 @@ const ROUTES = [
   ['POST', 'users', createUser],
   ['PATCH', 'users/:email', patchUser],
   ['DELETE', 'users/:email', deleteUser],
+  ['GET', 'filters', listFilters],
+  ['POST', 'filters', createFilter],
+  ['DELETE', 'filters/:id', deleteFilter],
   ['GET', 'audit', audit],
   ['GET', 'export/state', exportState],
 ];
@@ -547,6 +551,124 @@ async function deleteUser(c, rawEmail) {
   }
   const warning = await syncAccessGroup(c.env, c.db, c.deps.fetch);
   return json({ ok: true, ...(warning ? { warning } : {}) });
+}
+
+// ---------- shared filters ----------
+// Saved list-view filters shared with everyone who can view a project (DESIGN.md → Saved filters and CSV export).
+// Personal filters are kept in the user's prefs instead.
+const SF_NAME_MAX = 60, SF_PARAMS_MAX = 1000, SF_PER_PROJECT = 100;
+// the list-view state a saved filter carries (site/liststate.js curQuery); anything else (lang=, legacy c=/s=…) is refused
+const SF_KEYS = new Set(['p', 'q', 'sort', 'per']);
+const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** `p` when it is a top-level project of the deployed catalog (a registry entry or a document's project), else null. */
+function catalogProject(catalog, p) {
+  if (typeof p !== 'string' || !p || p === '*' || p.includes('/') || p.length > 200 || PROTO_KEYS.has(p)) return null;
+  if (Object.hasOwn(catalog.projects || {}, p) && !catalog.projects[p]?.parent) return p;
+  return catalog.docs.some((d) => d.project === p) ? p : null;
+}
+
+/**
+ * Canonical params of a filter shared in `project`: a list-view query string without `page`, whose scope (`p`) and
+ * any project conditions in the search text stay inside `project`, so a shared filter never names another project.
+ */
+function filterParams(v, project) {
+  if (typeof v !== 'string' || v.length > SF_PARAMS_MAX) fail(400, `params must be a string of at most ${SF_PARAMS_MAX} characters`);
+  const sp = new URLSearchParams(v.replace(/^[?#]+/, ''));
+  sp.delete('page');
+  for (const k of new Set(sp.keys())) if (!SF_KEYS.has(k)) fail(400, `invalid parameter: ${k.slice(0, 40)}`);
+  const scope = sp.getAll('p');
+  if (scope.length !== 1 || topProject(scope[0]) !== project) fail(400, `params must be scoped to project ${project} (p=${project}…)`);
+  for (const q of sp.getAll('q')) {
+    // every comma alternative: `p:A/x,B` must not slip B past a check on the joined value
+    if (parseQuery(q).fields.some((f) => f.key === 'project' && (f.values || [f.value]).some((v) => topProject(v) !== project))) fail(400, `the search text may only name project ${project}`);
+  }
+  const out = sp.toString();
+  if (out.length > SF_PARAMS_MAX) fail(400, `params must be a string of at most ${SF_PARAMS_MAX} characters`);
+  return out;
+}
+
+function filterName(v) {
+  const name = typeof v === 'string' ? v.trim() : '';
+  if (!name || name.length > SF_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name)) fail(400, `name must be 1–${SF_NAME_MAX} characters`);
+  return name;
+}
+
+/** Names of filter creators, only for people the caller may see (a creator removed from the project shows no name). */
+async function filterNamer(c, catalog) {
+  const vis = await visiblePeople(c.db, c.env, c.user, catalog);
+  const name = await namesFor(c.db, vis);
+  return (e) => (e && vis.has(String(e).toLowerCase()) ? name(e) : null);
+}
+
+const filterView = (c, name, r) => ({
+  id: r.id, project: r.project, name: r.name, params: r.params, created_at: r.created_at,
+  created_by_name: name(r.created_by), mine: r.created_by === c.user.email, canDelete: canManage(c.user, r.project),
+});
+
+/**
+ * GET /api/filters[?project=<key>]: shared filters of one project, or of every project the caller can view.
+ * Viewers of a project (members, '*', public projects) can list; owners see all rows, even of projects that are gone.
+ */
+async function listFilters(c) {
+  const catalog = await loadCatalog(c.env, c.request);
+  const pub = publicOf(catalog);
+  const want = c.url.searchParams.get('project');
+  let rows;
+  if (want) {
+    const p = topProject(want);
+    // the same 404 for a project that does not exist as for one the caller cannot view (no tenant discovery)
+    if (!canSee(c.user, p, pub) || (!catalogProject(catalog, p) && !c.user.owner)) fail(404, 'project not found');
+    rows = (await c.db.prepare('SELECT * FROM shared_filters WHERE project = ? ORDER BY name').bind(p).all()).results;
+  } else {
+    rows = (await c.db.prepare('SELECT * FROM shared_filters ORDER BY project, name').all()).results
+      .filter((r) => c.user.owner || (canSee(c.user, r.project, pub) && catalogProject(catalog, r.project)));
+  }
+  const name = await filterNamer(c, catalog);
+  return json(rows.map((r) => filterView(c, name, r)));
+}
+
+/** POST /api/filters { project, name, params }: manager of the project or owner. The same name replaces the old one. */
+async function createFilter(c) {
+  const body = await readJson(c.request, 4096);
+  if (!isObject(body)) fail(400, 'body must be a JSON object');
+  const bad = Object.keys(body).filter((k) => !['project', 'name', 'params'].includes(k));
+  if (bad.length) fail(400, `unknown fields: ${bad.join(', ').slice(0, 200)}`);
+  const raw = typeof body.project === 'string' ? body.project : '';
+  // authorisation before the catalog lookup: callers who manage nothing learn nothing about which projects exist
+  if (!raw || raw.includes('/') || !canManage(c.user, raw)) fail(403, '需要 manager 權限');
+  const catalog = await loadCatalog(c.env, c.request);
+  const project = catalogProject(catalog, raw);
+  if (!project) fail(400, 'project must be a top-level project of the deployed catalog');
+  const name = filterName(body.name);
+  const params = filterParams(body.params, project);
+  const cur = await c.db.prepare('SELECT id, params FROM shared_filters WHERE project = ? AND name = ?').bind(project, name).first();
+  if (!cur) {
+    const n = await c.db.prepare('SELECT COUNT(*) AS n FROM shared_filters WHERE project = ?').bind(project).first('n');
+    if (n >= SF_PER_PROJECT) fail(400, `a project can have at most ${SF_PER_PROJECT} shared filters`);
+  }
+  await c.db.batch([
+    c.db.prepare(`INSERT INTO shared_filters (project, name, params, created_by, created_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (project, name) DO UPDATE SET params = excluded.params, created_by = excluded.created_by, created_at = excluded.created_at`)
+      .bind(project, name, params, c.user.email, c.at),
+    history(c, { action: cur ? 'filter.update' : 'filter.create', field: `${project} ${name}`, old: cur?.params ?? null, value: params }),
+  ]);
+  const row = await c.db.prepare('SELECT * FROM shared_filters WHERE project = ? AND name = ?').bind(project, name).first();
+  return json(filterView(c, await filterNamer(c, catalog), row), cur ? 200 : 201);
+}
+
+/** DELETE /api/filters/:id: manager of the filter's project or owner; 404 when the caller cannot view the project. */
+async function deleteFilter(c, id) {
+  if (!/^\d{1,15}$/.test(id)) fail(404, 'filter not found');
+  const row = await c.db.prepare('SELECT * FROM shared_filters WHERE id = ?').bind(Number(id)).first();
+  const catalog = row && !c.user.owner ? await loadCatalog(c.env, c.request) : null;
+  if (!row || (!c.user.owner && !canSee(c.user, row.project, publicOf(catalog)))) fail(404, 'filter not found');
+  if (!canManage(c.user, row.project)) fail(403, '需要 manager 權限');
+  await c.db.batch([
+    c.db.prepare('DELETE FROM shared_filters WHERE id = ?').bind(row.id),
+    history(c, { action: 'filter.delete', field: `${row.project} ${row.name}`, old: row.params }),
+  ]);
+  return json({ ok: true });
 }
 
 // ---------- owner tools ----------

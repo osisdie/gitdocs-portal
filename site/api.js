@@ -35,15 +35,29 @@ export async function api(method, path, body) {
   return j;
 }
 
+// ---------- project-shared filters (server mode) ----------
+/** Shared filters of `project`, or of every project the user can view when omitted. */
+export const listSharedFilters = (project = '') => api('GET', `/api/filters${project ? `?project=${encodeURIComponent(project)}` : ''}`);
+/** { project, name, params } → the stored row; the same name in the same project replaces it. */
+export const saveSharedFilter = (f) => api('POST', '/api/filters', f);
+export const deleteSharedFilter = (id) => api('DELETE', `/api/filters/${encodeURIComponent(id)}`);
+
 // ---------- preferences ----------
-function localPrefs() { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch { return {}; } }
+// In server mode the browser may be shared by several Access identities (other tenants included), and localStorage is
+// not keyed by account. So there it only mirrors UI-only settings that say nothing about projects or people; saved
+// filters, focus projects and anything else live in the server copy alone and are never merged in from local storage.
+const LOCAL_SAFE = ['theme', 'lang', 'listPer'];
+const pickSafe = (p) => Object.fromEntries(LOCAL_SAFE.filter((k) => Object.hasOwn(p || {}, k)).map((k) => [k, p[k]]));
+function localPrefs() {
+  try { const v = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; }
+}
 function saveLocal(p) { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* storage blocked */ } }
-export function getPrefs() { return ME ? { ...localPrefs(), ...ME.prefs } : localPrefs(); }
-/** Merge `patch` into prefs: always mirrored to localStorage, and PUT to the server in server mode. */
+export function getPrefs() { return ME ? { ...pickSafe(localPrefs()), ...ME.prefs } : localPrefs(); }
+/** Merge `patch` into prefs: mirrored to localStorage (server mode: UI-only keys), and PUT to the server in server mode. */
 export async function setPrefs(patch) {
   const next = { ...getPrefs(), ...patch };
-  saveLocal(next);
-  if (!ME) return next;
+  if (!ME) { saveLocal(next); return next; }
+  saveLocal(pickSafe(next));
   ME.prefs = next;
   await api('PUT', '/api/me/prefs', next);
   return next;
