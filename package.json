@@ -15,6 +15,9 @@
     "doc": "node scripts/doc.mjs",
     "vault": "node scripts/vault.mjs",
     "engine:update": "bash scripts/engine.sh update",
-    "engine:check": "bash scripts/engine.sh check"
+    "engine:check": "bash scripts/engine.sh check",
+    "test": "node --test test/*.test.mjs",
+    "state:pull": "node scripts/state-pull.mjs",
+    "db:migrate": "npx --yes wrangler@4.166.0 d1 migrations apply DB --remote"
   }
 }

@@ -5,7 +5,8 @@
 //  3. Copy site/ (portal UI) and docs/ into dist/, honouring sensitivity:
 //       機密   → file deployed, body withheld from the search index, preview gated behind a click
 //       極機密 → file NOT deployed, no body; listed as metadata only ("僅存 git，未上傳")
-//     --max-sensitivity=<level> drops every doc above <level> entirely (for share builds; also drops the vault).
+//     --max-sensitivity=<level> drops every doc above <level> entirely (for share builds; also drops the vault and
+//     the reporter / assignee / reviewer emails).
 //     --no-vault  do not deploy vault.json ({{vault:…}} fields then stay masked for everyone).
 //     --check  only reports what would change.
 //  4. Vault: vault/vault.json (ciphertext only) → dist/vault.json. HTML docs that reference {{vault:…}} get the
@@ -13,7 +14,7 @@
 //     masks fields and asks the portal to show a value in the portal's own dialog — it never sees keys or plaintext.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, CONTENT, DOCS, VAULT_FILE, SENSITIVITIES, sensRank, loadCatalog, saveCatalog, syncCatalog, toRecord, gitHistory } from './lib/catalog.mjs';
+import { ROOT, CONTENT, DOCS, VAULT_FILE, NOTES_DIR, SENSITIVITIES, sensRank, loadCatalog, saveCatalog, syncCatalog, toRecord, gitHistory, PEOPLE_FIELDS } from './lib/catalog.mjs';
 
 const SITE = path.join(ROOT, 'site');
 const DIST = path.join(ROOT, 'dist');
@@ -42,6 +43,7 @@ if (checkOnly) {
 }
 saveCatalog(catalog);
 
+const builtAt = new Date().toISOString();
 const records = [], search = [], excluded = new Set();
 let dropped = 0;
 for (const it of items) {
@@ -49,7 +51,10 @@ for (const it of items) {
   const rank = sensRank(it.entry.sensitivity);
   if (it.entry.hidden || rank > maxRank) { excluded.add(abs); dropped++; continue; }
   const rec = toRecord(it);
+  // `doc set sensitivity=` always marks a doc reviewed, so above 內部 without that mark means "detected, not reviewed"
+  if (!it.entry.sensitivityReviewed && rank > sensRank('內部')) rec.sensitivityPending = true;
   delete rec.sensitivityReviewed;
+  if (maxArg) for (const k of PEOPLE_FIELDS) delete rec[k]; // share builds leave the organisation: no staff emails
   rec.history = gitHistory(it.rel);
   if (rank >= sensRank('極機密')) { rec.offline = true; excluded.add(abs); }
   else if (rank >= sensRank('機密')) rec.gated = true;
@@ -59,10 +64,13 @@ for (const it of items) {
 
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.cpSync(SITE, DIST, { recursive: true });
+// version the service worker's shell cache per build
+const SW = path.join(DIST, 'sw.js');
+if (fs.existsSync(SW)) fs.writeFileSync(SW, fs.readFileSync(SW, 'utf8').replaceAll('__BUILD__', Date.parse(builtAt).toString(36)));
 const DIST_DOCS = path.join(DIST, 'docs');
 fs.cpSync(DOCS, DIST_DOCS, {
   recursive: true,
-  filter: (s) => !path.basename(s).includes(':') && !excluded.has(s) && s !== path.join(DOCS, 'catalog.json'),
+  filter: (s) => !path.basename(s).includes(':') && !excluded.has(s) && s !== path.join(DOCS, 'catalog.json') && s !== NOTES_DIR,
 });
 if (withVault) fs.copyFileSync(VAULT_FILE, path.join(DIST, 'vault.json'));
 
@@ -80,7 +88,7 @@ for (const it of items) {
 
 records.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
 const out = {
-  builtAt: new Date().toISOString(),
+  builtAt,
   maxSensitivity: maxArg || null,
   site: catalog.site,
   vault: withVault,

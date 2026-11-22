@@ -2,6 +2,10 @@
 # `npm run engine:update` copies them from upstream, `npm run engine:check` (CI) fails when they drift.
 site/
 scripts/
+functions/
+migrations/
+test/
+wrangler.toml.example
 package.json
 LICENSE
 .env.example

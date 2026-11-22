@@ -1,4 +1,6 @@
 # CI for a content repo on GitHub (copy to .github/workflows/docs.yml). Same checks as templates/gitlab-ci.yml.
+# Deploys stay manual (npm run deploy). In server mode apply D1 migrations before deploying a new engine version:
+#   npx --yes wrangler@4.166.0 d1 migrations apply DB --remote      (npm run db:migrate)
 name: docs
 on: [push, pull_request]
 jobs:

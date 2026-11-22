@@ -1,6 +1,8 @@
 # CI for a content repo on GitLab (copy to .gitlab-ci.yml).
 #  check  — engine files must match gitdocs-portal upstream; catalog builds; every {{vault:…}} resolves; no plaintext credentials.
 #  deploy — manual, default branch only; needs CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / CF_PAGES_PROJECT as masked CI variables.
+#           Server mode (wrangler.toml with a D1 binding): pending D1 migrations are applied first; the token then also
+#           needs Account → D1 → Edit.
 image: node:22-alpine
 variables:
   GIT_DEPTH: 0            # full history: the portal shows per-file git history
@@ -22,4 +24,5 @@ deploy:
       when: manual
   script:
     - node scripts/build.mjs
+    - if [ -f wrangler.toml ] && grep -q '^\[\[d1_databases\]\]' wrangler.toml; then npx --yes wrangler@4.166.0 d1 migrations apply DB --remote; fi
     - npx --yes wrangler@4.166.0 pages deploy dist --project-name "$CF_PAGES_PROJECT" --branch main --commit-dirty=true

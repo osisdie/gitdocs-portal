@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Catalog management CLI.  npm run doc -- <command> …
-import { loadCatalog, saveCatalog, syncCatalog, toRecord, findById, README_FIELDS, SENSITIVITIES } from './lib/catalog.mjs';
+import { loadCatalog, saveCatalog, syncCatalog, toRecord, findById, README_FIELDS, SENSITIVITIES, PEOPLE_FIELDS } from './lib/catalog.mjs';
 import { parseQuery, matchDoc, QUERY_HELP } from '../site/query.js';
 
 const USAGE = `用法：npm run doc -- <指令>
@@ -8,7 +8,10 @@ const USAGE = `用法：npm run doc -- <指令>
   ls [查詢]                         列出文件（查詢語法同入口搜尋框，見下方）
   show <id>                         顯示一份文件的全部欄位
   set <id> key=value …              改欄位：title category status sensitivity desc url date
+                                    reporter assignee reviewer（email；值寫 - 代表清除）
                                     （改 title/desc/url/date 會自動 lock；改 sensitivity 會標記為已複核）
+  assign <id> <email|->             指派處理人（- 清除）
+  review <id> <email|->             指定確認人（- 清除）
   tag <id> +foo -bar baz            加／移除標籤（沒有前綴＝加）
   relate <id> <id2> [-<id3>]        建立關聯（-id 為移除）
   supersede <new> <old>             <new> 取代 <old>（加 --archive 把舊的狀態改成「封存」）
@@ -41,9 +44,16 @@ function need(c, id) {
   if (!hit) die(`找不到編號 ${id}`);
   return hit;
 }
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function setPerson(entry, key, value) {
+  if (value === '-' || value === '') { delete entry[key]; return; }
+  if (!EMAIL.test(value)) die(`${key} 必須是 email（或 - 清除）：${value}`);
+  entry[key] = value.toLowerCase();
+}
 function setField(c, entry, key, value) {
+  if (PEOPLE_FIELDS.includes(key)) return setPerson(entry, key, value);
   const enums = { category: c.categories, status: c.statuses, sensitivity: SENSITIVITIES };
-  const allowed = ['title', 'desc', 'url', 'date', ...Object.keys(enums)];
+  const allowed = ['title', 'desc', 'url', 'date', ...Object.keys(enums), ...PEOPLE_FIELDS];
   if (!allowed.includes(key)) die(`不能改「${key}」。可改：${allowed.join(' ')}（project/subproject 由資料夾決定）`);
   if (enums[key] && !enums[key].includes(value)) die(`${key} 必須是：${enums[key].join(' / ')}`);
   if (key === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) die('date 格式：YYYY-MM-DD');
@@ -79,6 +89,16 @@ switch (cmd) {
     for (const [k, v] of kv(args.slice(1))) setField(c, entry, k, v);
     saveCatalog(c);
     console.log(`#${entry.id} 已更新${entry.locked ? '（locked）' : ''}`);
+    break;
+  }
+  case 'assign': case 'review': {
+    const { c } = load();
+    const { entry } = need(c, args[0]);
+    if (args.length < 2) die(`${cmd} <id> <email|->`);
+    const key = cmd === 'assign' ? 'assignee' : 'reviewer';
+    setPerson(entry, key, args[1]);
+    saveCatalog(c);
+    console.log(`#${entry.id} ${key}：${entry[key] || '（無）'}`);
     break;
   }
   case 'tag': {

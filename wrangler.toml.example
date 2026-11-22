@@ -1,0 +1,19 @@
+# Copy to wrangler.toml in the content repo (it is content-owned: engine:update never touches it).
+# Needed only for server mode (Pages Functions + D1). Static mode works without this file.
+name = "my-docs"                      # the Cloudflare Pages project name
+pages_build_output_dir = "dist"
+compatibility_date = "2025-09-01"
+
+[[d1_databases]]
+binding = "DB"                        # functions/ read env.DB; without it the portal stays in static mode
+database_name = "gitdocs"
+database_id = "00000000-0000-0000-0000-000000000000"   # from: npx wrangler d1 create gitdocs
+migrations_dir = "migrations"
+
+# Non-secret settings can live here; secrets go through `wrangler pages secret put` (see README → Server mode).
+[vars]
+TEAM_DOMAIN = "example.cloudflareaccess.com"
+ACCESS_AUD = ""                       # Access application → Overview → Application Audience (AUD) tag
+OWNER_EMAILS = "owner@example.com"
+# ACCESS_GROUP_ID = ""                # optional: keep this Access group's include list in sync with users
+# CF_ACCOUNT_ID = ""

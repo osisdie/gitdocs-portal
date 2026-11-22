@@ -16,6 +16,7 @@ versioned. The output is a static site; the reference deployment is Cloudflare P
 - [Sensitivity levels](#sensitivity-levels)
 - [Catalog CLI and search syntax](#catalog-cli-and-search-syntax)
 - [Deploying](#deploying)
+- [Server mode (multi-user)](#server-mode-multi-user)
 - [Contributing](#contributing)
 
 ## Features
@@ -33,7 +34,11 @@ versioned. The output is a static site; the reference deployment is Cloudflare P
   in `vault/vault.json` and decrypted only in the browser after entering a passphrase.
 - **Postman**: environment and collection files are first-class documents; `npm run vault -- postman <file>`
   moves secret variables into the vault.
-- No framework, no runtime dependencies. Node ≥ 20 for the build.
+- **Workflow** (Mantis-style): `待處理 → 待確認 → 已確認 → 已發布 / 封存` (new → feedback → confirmed → published /
+  archived), with `reporter` / `assignee` / `reviewer` per document.
+- **Server mode** (optional): Pages Functions + D1 behind Cloudflare Access — per-project roles, web edits and notes,
+  a server-side vault with an audit log. See [Server mode](#server-mode-multi-user).
+- No framework, no runtime dependencies. Node ≥ 20 for the build, Node ≥ 22 for `npm test`.
 
 ## Quick start
 
@@ -121,7 +126,9 @@ a document back down: `npm run doc -- set <id> sensitivity=內部`.
 ```bash
 npm run doc -- ls 'k:API cat:評估 -s:已發布'
 npm run doc -- show 14
-npm run doc -- set 12 status=審查中 category=稽核
+npm run doc -- set 12 status=待確認 category=稽核
+npm run doc -- assign 12 writer@example.com        # assignee; '-' clears
+npm run doc -- review 12 lead@example.com          # reviewer; '-' clears
 npm run doc -- tag 14 +vendor -draft
 npm run doc -- relate 9 11 13
 npm run doc -- supersede 14 6 --archive
@@ -141,8 +148,88 @@ third-party build). Needs `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_P
 Protect the site with Cloudflare Access (or any auth proxy). Include `*.<project>.pages.dev` in the Access
 application: every deployment also gets a permanent preview URL.
 
+## Server mode (multi-user)
+
+Static mode is one audience behind one auth proxy. Server mode adds people: Cloudflare Pages Functions
+(`functions/`) and a D1 database (`migrations/`) behind Cloudflare Access give per-project roles, workflow edits and
+notes from the browser, and a vault that the server decrypts for editors only, with an audit trail. The full contract
+is [DESIGN.md](DESIGN.md). Without a D1 binding the functions pass every request through, so static deployments of
+the same engine behave exactly as before; if `ACCESS_AUD`, `TEAM_DOMAIN` or `OWNER_EMAILS` is set but the binding is
+missing, every request gets 503 instead of falling back to an unfiltered static site.
+
+| | viewer | editor | manager | owner |
+|---|:-:|:-:|:-:|:-:|
+| see project docs, search, notes | ✓ | ✓ | ✓ | ✓ |
+| change status / assignee / reviewer / tags, reveal vault fields | | ✓ | ✓ | ✓ |
+| invite / change / remove members of the project | | | ✓ | ✓ |
+| all projects, disable users, audit log | | | | ✓ |
+
+Roles are per top-level project (`*` = every project). Owners come from `OWNER_EMAILS`. Docs in the index project
+`（索引）` need an owner or a membership that names it.
+
+### Setup
+
+1. **Cloudflare Access**: one self-hosted application covering the Pages domain and `*.<project>.pages.dev`. Note
+   the team domain (`<team>.cloudflareaccess.com`) and the application's **Application Audience (AUD) tag**.
+2. **D1 + migrations** (in the content repo):
+
+   ```bash
+   npx --yes wrangler@4.166.0 d1 create gitdocs
+   cp wrangler.toml.example wrangler.toml          # set name, database_id, [vars]
+   npx --yes wrangler@4.166.0 d1 migrations apply gitdocs --remote   # later: npm run db:migrate
+   ```
+
+3. **Variables and secrets** (`[vars]` in `wrangler.toml`, secrets with `wrangler pages secret put`):
+
+   | Name | Kind | Value |
+   |---|---|---|
+   | `TEAM_DOMAIN` | var | `example.cloudflareaccess.com` |
+   | `ACCESS_AUD` | var | the Access application's AUD tag |
+   | `OWNER_EMAILS` | var | comma-separated owner emails |
+   | `VAULT_KEY` | secret | `node scripts/vault.mjs key \| npx --yes wrangler@4.166.0 pages secret put VAULT_KEY --project-name <project>` |
+   | `ACCESS_GROUP_ID`, `CF_ACCOUNT_ID` | var | optional: keep an Access group's include list equal to the enabled users. Use a **dedicated group used only by this app**: the sync rewrites its whole include list |
+   | `CF_API_TOKEN` | secret | optional, for the group sync: Account → Access: Organizations, Identity Providers, and Groups → Edit |
+   | `DEV_USER_EMAIL` | `.dev.vars` | local development only (honoured on `localhost` without a JWT) |
+
+   `VAULT_KEY` is the raw AES key derived from the vault passphrase. Workers cannot run the vault's 600,000-iteration
+   PBKDF2 (the limit is 100,000), so the server takes the key instead; set it again after `npm run vault -- rekey`.
+4. **Deploy**: `npm run deploy` (applies pending migrations first when `wrangler.toml` has a D1 binding). The deploy
+   token needs Account → Cloudflare Pages → Edit and Account → D1 → Edit.
+5. Sign in as an owner, open **管理** (`#/admin`) and invite people. With the group sync configured, invited emails
+   are added to the Access group and removed when they are disabled, deleted, or lose their last membership (and added
+   back with a new one). Each change rewrites the group's email rules to the full list from D1 (enabled users with a
+   membership, plus `OWNER_EMAILS`), so concurrent edits cannot lose each other's update; non-email rules are kept.
+   If the sync fails the D1 change stays and the response carries a `warning`.
+6. **Local development**: run `npx --yes wrangler@4.166.0 pages dev dist --ip 127.0.0.1` (bound to 127.0.0.1, never
+   `0.0.0.0`), with `DEV_USER_EMAIL` in `.dev.vars`.
+
+### State back to git
+
+Web edits live in D1. `npm run state:pull` (owner, local; uses `wrangler d1 execute --remote`) writes changed
+status / assignee / reviewer / tags into `docs/catalog.json`, appends notes to `docs/notes/<id>.md`, marks what it
+exported in the `synced` table and prints a commit message. `--dry-run` shows the changes without writing anything.
+The database name comes from `wrangler.toml`, `$D1_DATABASE` or `--db=<name>`.
+
+### Security notes
+
+- Every request is checked by `functions/_middleware.js`: the `Cf-Access-Jwt-Assertion` JWT is verified (RS256
+  against the team's certs, `aud`, `exp`, `iss`) and the email must be an owner or an enabled user. Access is the
+  front door; the middleware does not trust it blindly.
+- Paths are decoded once and normalised before any rule runs (leftover `%`, `..` and `\` are refused), and the
+  middleware is default-deny: only the app-shell files listed in `functions/_lib/gate.js` (`SHELL_FILES`, kept equal
+  to `site/` by a test) pass; anything else, including files a later build adds, is 404 until listed.
+- `catalog.json`, `search-index.json` and `/docs/*` are filtered per user; unknown files under `/docs/` are
+  owner-only; `/docs/*` responses always get the sandbox CSP and `nosniff` from the middleware; `/vault.json` is
+  never served. Mutating `/api` calls need `Content-Type: application/json` and a same-origin `Sec-Fetch-Site` /
+  `Origin` (CSRF). Vault values come only from `POST /api/vault/reveal`, which checks
+  the role and that the document references the secret, writes `vault_audit` and answers `Cache-Control: no-store`.
+- A sandboxed HTML document can only ask the portal to open a masked dialog for a field it references; nothing is
+  decrypted or audited until the user clicks 顯示 / 複製 in that dialog.
+- `VAULT_KEY` opens every secret in `vault/vault.json` (which is in git): treat it like the passphrase.
+- Share builds (`--max-sensitivity`) also drop reporter / assignee / reviewer emails. `docs/notes/` is never deployed.
+
 ## Contributing
 
 Issues and pull requests are welcome — UI, query language, detectors, vault, docs, translations. Keep it
-dependency-free, make sure `npm run build` and `node scripts/vault.mjs check` pass on the demo content, and never
+dependency-free, make sure `npm test`, `npm run build` and `node scripts/vault.mjs check` pass on the demo content, and never
 include real documents or secrets in examples. Licensed under MIT.

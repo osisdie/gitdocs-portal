@@ -16,6 +16,7 @@ MantisBT 風格的文件入口，**git 就是資料庫**。把 HTML／Markdown�
 - [搜尋語法](#搜尋語法)
 - [locked：README 索引與手動修改](#lockedreadme-索引與手動修改)
 - [入口畫面](#入口畫面)
+- [Server mode（多人模式）](#server-mode多人模式)
 
 ## 核心程式與內容 repo 分開
 
@@ -75,7 +76,10 @@ scripts/deploy.sh                                            部署 dist/ 到 Cl
 | 專案 `project` | 資料夾 | `docs/<projectRoot>/` 下第一層資料夾；直接放在根目錄的檔案歸在「（索引）」 |
 | 子專案 `subproject` | 資料夾 | 第二層資料夾，例如 `handbook/onboarding` → 專案 handbook、子專案 onboarding |
 | 分類 `category` | 推斷，可改 | 計畫／評估／比較／稽核／設計／UX／表單／技能手冊／劇本／文案／腳本／索引／報告 |
-| 狀態 `status` | 推斷，可改 | 草稿／審查中／本機／已發布／封存；有原始網址的自動標成「已發布」 |
+| 狀態 `status` | 推斷，可改 | 待處理／待確認／已確認／已發布／封存（Mantis 式流程）；新檔案預設「待處理」，有原始網址的標成「已發布」。舊值會自動轉換：草稿→待處理、審查中→待確認、本機→已確認 |
+| 回報人 `reporter` | git，可改 | 第一次加入這個檔案的 git 作者 email |
+| 處理人 `assignee` | 手動 | 要處理這份文件的人（email），`npm run doc -- assign` |
+| 確認人 `reviewer` | 手動 | 要確認這份文件的人（email），`npm run doc -- review` |
 | 機敏性 `sensitivity` | 推斷，可改 | 公開／內部／機密／極機密，詳見下一節 |
 | 標籤 `tags` | 手動 | 自由輸入，用 `npm run doc -- tag` 管理 |
 | 關鍵字 `keywords` | 自動 | 依 `catalog.json` 的 `keywords` 字典比對：標題或說明出現 1 次，或內文出現 2 次以上 |
@@ -117,7 +121,9 @@ scripts/deploy.sh                                            部署 dist/ 到 Cl
 npm run doc -- ls                                  # 全部
 npm run doc -- ls 'k:API cat:評估 -s:已發布'     # 查詢語法同搜尋框
 npm run doc -- show 14
-npm run doc -- set 12 status=審查中 category=稽核
+npm run doc -- set 12 status=待確認 category=稽核
+npm run doc -- assign 12 writer@example.com          # 指派處理人；- 清除
+npm run doc -- review 12 lead@example.com            # 指定確認人；- 清除
 npm run doc -- set 10 sensitivity=機密              # 會標記為已複核
 npm run doc -- set 3 title='新標題'                  # 改 title/desc/url/date 會自動 lock
 npm run doc -- tag 14 +vendor +p0 -draft
@@ -169,6 +175,78 @@ npm run doc -- filter add '本週' 'after:-7d'
 - **專案頁** `#/project/<名稱>`：專案說明、子專案、各項統計、最近文件。
 - **文件頁** `#/doc/<編號>`：metadata、機敏警示、vault 欄位清單、關聯／被取代／相似文件、git 歷史、預覽（Markdown 會轉成網頁顯示，`{{vault:…}}` 顯示成遮罩）。
 
+## Server mode（多人模式）
+
+靜態模式是「一群人、一個登入關卡」。Server mode 加上「人」：在 Cloudflare Access 後面用 Pages Functions（`functions/`）
+＋ D1（`migrations/`），提供依專案的角色、在網頁上改狀態／指派／確認人／標籤與留言，以及由伺服器解密、只給 editor 以上、
+留有稽核紀錄的 vault。完整規格見 [DESIGN.md](DESIGN.md)。沒有綁 D1 時 functions 會直接放行，同一份核心程式的靜態部署行為完全不變；但只要設了 `ACCESS_AUD`、`TEAM_DOMAIN` 或 `OWNER_EMAILS`
+卻沒有 D1 綁定，所有請求都回 503，不會退回成沒有過濾的靜態站。
+
+| | viewer | editor | manager | owner |
+|---|:-:|:-:|:-:|:-:|
+| 看專案文件、搜尋、留言 | ✓ | ✓ | ✓ | ✓ |
+| 改狀態／處理人／確認人／標籤、顯示 vault 欄位 | | ✓ | ✓ | ✓ |
+| 邀請／調整／移除專案成員 | | | ✓ | ✓ |
+| 全部專案、停用使用者、稽核紀錄 | | | | ✓ |
+
+角色以第一層專案為單位（`*`＝全部專案）。owner 由 `OWNER_EMAILS` 決定。索引專案「（索引）」的文件只有 owner，或成員資格明確寫了「（索引）」的人看得到。
+
+### 設定步驟
+
+1. **Cloudflare Access**：建一個 self-hosted application，涵蓋 Pages 網域和 `*.<project>.pages.dev`。記下 team domain
+   （`<team>.cloudflareaccess.com`）和 application 的 **Application Audience (AUD) tag**。
+2. **D1 與 migrations**（在內容 repo）：
+
+   ```bash
+   npx --yes wrangler@4.166.0 d1 create gitdocs
+   cp wrangler.toml.example wrangler.toml          # 填 name、database_id、[vars]
+   npx --yes wrangler@4.166.0 d1 migrations apply gitdocs --remote   # 之後可用 npm run db:migrate
+   ```
+
+3. **環境變數與 secret**（變數放 `wrangler.toml` 的 `[vars]`，secret 用 `wrangler pages secret put`）：
+
+   | 名稱 | 種類 | 值 |
+   |---|---|---|
+   | `TEAM_DOMAIN` | 變數 | `example.cloudflareaccess.com` |
+   | `ACCESS_AUD` | 變數 | Access application 的 AUD tag |
+   | `OWNER_EMAILS` | 變數 | owner 的 email，逗號分隔 |
+   | `VAULT_KEY` | secret | `node scripts/vault.mjs key \| npx --yes wrangler@4.166.0 pages secret put VAULT_KEY --project-name <project>` |
+   | `ACCESS_GROUP_ID`、`CF_ACCOUNT_ID` | 變數 | 選用：讓某個 Access group 的 include 名單與啟用中的使用者同步。請用**只給這個 app 用的專屬 group**：同步會改寫整份 include 名單 |
+   | `CF_API_TOKEN` | secret | 選用，group 同步用：Account → Access: Organizations, Identity Providers, and Groups → Edit |
+   | `DEV_USER_EMAIL` | `.dev.vars` | 只限本機開發（只在 `localhost` 且沒有 JWT 時生效） |
+
+   `VAULT_KEY` 是由 vault 密語導出的 AES 金鑰。Workers 跑不了 vault 的 60 萬次 PBKDF2（上限 10 萬次），所以伺服器直接拿金鑰；
+   `npm run vault -- rekey` 之後要重新設定。
+4. **部署**：`npm run deploy`（`wrangler.toml` 有 D1 綁定時會先套用待執行的 migrations）。部署用的 token 需要
+   Account → Cloudflare Pages → Edit 和 Account → D1 → Edit。
+5. 用 owner 帳號登入，打開「管理」（`#/admin`）邀請成員。有設定 group 同步時，受邀的 email 會加進 Access group；停用、刪除或失去最後一個專案成員資格時移除（再加入專案時加回）。每次變更都用 D1 算出的完整名單
+   （啟用中且至少有一個專案成員資格的使用者，加上 `OWNER_EMAILS`）改寫 group 的 email 規則，同時修改也不會互相蓋掉；非 email 規則保留。
+   同步失敗時 D1 的變更仍然保留，回應會帶 `warning`。
+6. **本機開發**：執行 `npx --yes wrangler@4.166.0 pages dev dist --ip 127.0.0.1`（只綁 127.0.0.1，不要用 `0.0.0.0`），
+   `DEV_USER_EMAIL` 放在 `.dev.vars`。
+
+### 把狀態寫回 git
+
+網頁上的修改存在 D1。`npm run state:pull`（owner 在本機執行，透過 `wrangler d1 execute --remote`）會把有變動的
+狀態／處理人／確認人／標籤寫進 `docs/catalog.json`、把留言附加到 `docs/notes/<id>.md`、在 `synced` 表記下已匯出的時間，
+並印出建議的 commit 訊息。`--dry-run` 只顯示變更、不寫任何東西。資料庫名稱取自 `wrangler.toml`、`$D1_DATABASE` 或 `--db=<name>`。
+
+### 安全性說明
+
+- 每個請求都經過 `functions/_middleware.js`：驗證 `Cf-Access-Jwt-Assertion` JWT（RS256、team 的公鑰、`aud`、`exp`、`iss`），
+  而且 email 必須是 owner 或啟用中的使用者。Access 是大門，但 middleware 不盲目相信它。
+- 路徑先解碼一次並正規化才套用規則（解碼後還有 `%`、`..` 或 `\` 一律拒絕）；middleware 預設拒絕：只有
+  `functions/_lib/gate.js` 的 `SHELL_FILES`（有測試確保與 `site/` 一致）列出的 app shell 檔案放行，其他檔案（包括之後 build
+  新增的）在列入前都是 404。
+- `catalog.json`、`search-index.json`、`/docs/*` 依使用者過濾；`/docs/` 底下不在目錄裡的檔案只有 owner 看得到；`/docs/*`
+  的回應一律由 middleware 加上 sandbox CSP 與 `nosniff`；`/vault.json` 永遠不提供。會修改資料的 `/api` 請求必須是
+  `Content-Type: application/json`，且帶同源的 `Sec-Fetch-Site`／`Origin`（防 CSRF）。vault 的值只能透過 `POST /api/vault/reveal` 取得：檢查角色、確認該文件確實引用這個 secret、寫入 `vault_audit`，
+  回應 `Cache-Control: no-store`。
+- sandbox 裡的 HTML 文件只能請入口開一個遮罩中的對話框，而且只限它引用的欄位；使用者在對話框裡按「顯示」／「複製」之前，
+  不會解密也不會留稽核紀錄。
+- `VAULT_KEY` 能解開 git 裡 `vault/vault.json` 的所有 secret，請和密語同等保管。
+- 分享用 build（`--max-sensitivity`）也會拿掉回報人／處理人／確認人的 email。`docs/notes/` 永遠不部署。
+
 ## 貢獻
 
-歡迎 issue 和 PR：UI、搜尋語法、偵測規則、vault、文件、翻譯都可以。請維持零相依套件，送出前確認示範內容的 `npm run build` 和 `node scripts/vault.mjs check` 都通過，範例裡不要放真實文件或憑證。授權：MIT。
+歡迎 issue 和 PR：UI、搜尋語法、偵測規則、vault、文件、翻譯都可以。請維持零相依套件，送出前確認 `npm test`、示範內容的 `npm run build` 和 `node scripts/vault.mjs check` 都通過，範例裡不要放真實文件或憑證。授權：MIT。

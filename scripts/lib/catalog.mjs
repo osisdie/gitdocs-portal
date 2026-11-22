@@ -17,11 +17,18 @@ export const CONTENT = process.env.CONTENT_DIR ? path.resolve(process.env.CONTEN
 export const DOCS = path.join(CONTENT, 'docs');
 export const CATALOG = path.join(DOCS, 'catalog.json');
 export const VAULT_FILE = path.join(CONTENT, 'vault', 'vault.json');
+/** Web notes exported by `npm run state:pull` (docs/notes/<id>.md): kept in git, not documents, never deployed. */
+export const NOTES_DIR = path.join(DOCS, 'notes');
 const EXTS = new Set(['.html', '.md', '.sh', '.json']);
 const isPostman = (name) => /\.postman_(collection|environment)\.json$/i.test(name);
 
 export const CATEGORIES = ['計畫', '評估', '比較', '稽核', '設計／UX', '表單', 'API', '技能手冊', '劇本／文案', '腳本', '索引', '報告'];
-export const STATUSES = ['草稿', '審查中', '本機', '已發布', '封存'];
+export const STATUSES = ['待處理', '待確認', '已確認', '已發布', '封存'];
+/** Statuses used before the Mantis-style workflow; syncCatalog rewrites them (idempotent). */
+export const STATUS_MIGRATION = { '草稿': '待處理', '審查中': '待確認', '本機': '已確認' };
+export const migrateStatus = (s) => STATUS_MIGRATION[s] || s;
+/** People fields on a doc (emails). Optional; `reporter` defaults to the file's first git author. */
+export const PEOPLE_FIELDS = ['reporter', 'assignee', 'reviewer'];
 /** Fields the README index can overwrite; changing one by hand locks the entry. */
 export const README_FIELDS = ['title', 'desc', 'url', 'date'];
 
@@ -52,11 +59,11 @@ export const DEFAULT_SITE = {
 };
 
 // ---------- text helpers ----------
-export function walk(dir) {
+export function walk(dir, { notes = false } = {}) {
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...walk(p));
+    if (e.isDirectory()) { if (notes || p !== NOTES_DIR) out.push(...walk(p, { notes })); }
     else if (EXTS.has(path.extname(e.name)) && !e.name.includes(':') && p !== CATALOG) out.push(p);
   }
   return out;
@@ -98,6 +105,15 @@ export function readReadmeIndex(site = DEFAULT_SITE) {
 
 function git(args) {
   try { return execFileSync('git', args, { cwd: CONTENT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
+}
+
+// Demo content in the engine repo must not publish committer emails.
+const INFER_REPORTER = CONTENT !== path.join(ROOT, 'examples');
+
+/** Email of the commit that added the file ('' when not in git). */
+function gitReporter(rel) {
+  if (!INFER_REPORTER) return '';
+  return git(['log', '--diff-filter=A', '--format=%ae', '--', rel]).split('\n').pop().toLowerCase();
 }
 
 function gitDate(rel) {
@@ -219,7 +235,7 @@ function extractMeta(rel, readme, site) {
   return {
     inferred: {
       title: title || base, project, subproject, category: inferCategory(rel, title || '', desc),
-      status: /^https?:\/\//.test(url) ? '已發布' : '本機',
+      status: /^https?:\/\//.test(url) ? '已發布' : '待處理',
       sensitivity: sens.level, date, url, desc,
     },
     sensReasons: sens.reasons,
@@ -231,15 +247,34 @@ function extractMeta(rel, readme, site) {
 }
 
 // ---------- catalog IO ----------
+/** Old names → new, then any missing workflow status appended; custom statuses are kept. */
+export function migrateStatusList(list) {
+  const out = [...new Set((Array.isArray(list) && list.length ? list : STATUSES).map(migrateStatus))];
+  for (const s of STATUSES) if (!out.includes(s)) out.push(s);
+  return out;
+}
+
+/** Rewrite `s:草稿` / `status:本機` … in saved filter queries. */
+const migrateFilterQuery = (q) => String(q).replace(/(^|\s)(-?)(s|status)([:=])("?)(草稿|審查中|本機)\5(?=\s|$)/g,
+  (_, sp, neg, k, op, qt, v) => `${sp}${neg}${k}${op}${qt}${STATUS_MIGRATION[v]}${qt}`);
+
+const isUrl = (u) => /^https?:\/\//.test(u || '');
+
+/** Old status values on one entry. A `本機` doc with an origin URL was shown as published, so it becomes 已發布. */
+function migrateEntryStatus(entry) {
+  if (entry.status === '本機' && !entry.locked && isUrl(entry.url)) entry.status = '已發布';
+  else entry.status = migrateStatus(entry.status);
+}
+
 export function loadCatalog() {
   const c = fs.existsSync(CATALOG) ? JSON.parse(fs.readFileSync(CATALOG, 'utf8')) : {};
   c.site = { ...DEFAULT_SITE, ...(c.site || {}) };
   c.categories = [...new Set([...(c.categories || []), ...CATEGORIES])];
-  c.statuses ||= STATUSES;
+  c.statuses = migrateStatusList(c.statuses);
   c.sensitivities = SENSITIVITIES;
   c.projects ||= {};
   c.keywords ||= DEFAULT_KEYWORDS;
-  c.filters ||= DEFAULT_FILTERS;
+  c.filters = (c.filters || DEFAULT_FILTERS).map((f) => ({ ...f, query: migrateFilterQuery(f.query) }));
   c.docs ||= {};
   return c;
 }
@@ -283,6 +318,8 @@ export function syncCatalog(catalog) {
     }
     // schema migration: fill fields introduced after the entry was created
     for (const k of ['subproject', 'sensitivity']) if (entry[k] === undefined) entry[k] = m.inferred[k];
+    migrateEntryStatus(entry);
+    if (!entry.reporter) { const r = gitReporter(m.rel); if (r) entry.reporter = r; }
     entry.project = m.inferred.project;
     entry.subproject = m.inferred.subproject;
     if (!Array.isArray(entry.tags) || (entry.subproject && entry.tags.length === 1 && entry.tags[0] === entry.subproject)) entry.tags = [];
@@ -294,7 +331,8 @@ export function syncCatalog(catalog) {
     // README is the source of truth for title/desc/url/date once it lists the doc, unless locked
     const r = readme[m.rel];
     if (r && !entry.locked) Object.assign(entry, { title: r.title, desc: r.desc, url: r.url || entry.url, date: r.date });
-    if (!entry.locked && entry.url && entry.status === '本機' && /^https?:\/\//.test(entry.url)) entry.status = '已發布';
+    // the README index is the publication record: listing an origin URL publishes a doc that is still 待處理
+    if (r && !entry.locked && entry.status === '待處理' && isUrl(r.url)) entry.status = '已發布';
     // project registry
     if (!catalog.projects[entry.project]) catalog.projects[entry.project] = { title: entry.project, desc: '' };
     if (entry.subproject) {

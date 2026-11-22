@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CONTENT, DOCS, VAULT_FILE, walk } from './lib/catalog.mjs';
-import { NAME_RE, VAULT_RE, refsIn, createVault, deriveKey, rekeyVault, seal, unseal, verifyKey } from '../site/vault-core.js';
+import { NAME_RE, VAULT_RE, refsIn, createVault, deriveKey, exportKey, rekeyVault, seal, unseal, verifyKey } from '../site/vault-core.js';
 
 
 const USAGE = `用法：npm run vault -- <指令>
@@ -16,6 +16,8 @@ const USAGE = `用法：npm run vault -- <指令>
   rm <name>                         刪除（仍被文件引用時會拒絕，加 --force 強制）
   mv <old> <new>                    改名，並同步改寫文件裡的 {{vault:old}}
   rekey                             換密語（全部重新加密；新密語取自 VAULT_NEW_PASSPHRASE 或互動輸入）
+  key                               印出由密語導出的 AES 金鑰（base64），給 server mode 的 VAULT_KEY secret 用
+                                    （rekey 之後要重新設定）
   check                             檢查引用：文件裡的 {{vault:x}} 都要存在；有密語時也驗證能全部解開
   scan [--fix] [檔案…]               找文件裡的明文憑證；--fix 收進 vault 並改寫成 {{vault:…}}
   postman <檔案> [--prefix=名稱]     Postman environment／collection：secret 型別或像憑證的變數收進 vault
@@ -91,7 +93,7 @@ async function unlock(v) {
 const needName = (n) => { if (!n || !NAME_RE.test(n)) die(`secret 名稱只能用 A-Z a-z 0-9 _ . / -：${n ?? '(未提供)'}`); return n; };
 
 // ---------- references in docs ----------
-const docFiles = () => (fs.existsSync(DOCS) ? walk(DOCS) : []);
+const docFiles = () => (fs.existsSync(DOCS) ? walk(DOCS, { notes: true }) : []); // notes too: they may quote credentials
 function references() {
   const map = new Map(); // name → [rel…]
   for (const f of docFiles()) for (const n of refsIn(fs.readFileSync(f, 'utf8'))) map.set(n, [...(map.get(n) || []), rel(f)]);
@@ -236,7 +238,14 @@ switch (cmd) {
     if (next.length < 12) die('密語至少 12 個字元。');
     const { vault } = await rekeyVault(v, key, next);
     saveVault(vault);
-    console.log(`已用新密語重新加密 ${Object.keys(vault.secrets).length} 筆。記得更新 .env 的 VAULT_PASSPHRASE。`);
+    console.log(`已用新密語重新加密 ${Object.keys(vault.secrets).length} 筆。記得更新 .env 的 VAULT_PASSPHRASE；server mode 也要重設 VAULT_KEY（npm run vault -- key）。`);
+    break;
+  }
+  case 'key': {
+    const v = needVault();
+    const key = await deriveKey(await passphrase(), v.kdf, true);
+    if (!(await verifyKey(key, v))) die('密語錯誤。');
+    process.stdout.write(await exportKey(key) + (process.stdout.isTTY ? '\n' : ''));
     break;
   }
   case 'check': {
