@@ -45,7 +45,8 @@ npm run vault -- ls | get <name> | rm <name> | mv <old> <new> | rekey | check
 ```
 
 - `vault/vault.json` 只有密文，可以 commit，secret 的異動也有版本紀錄。加密方式：PBKDF2-SHA256（60 萬次）→ AES-256-GCM，以 secret 名稱當 AAD，密文搬到別的名稱底下就解不開。Node 和瀏覽器共用 `site/vault-core.js`。
-- build 會部署 `vault.json`，並在含有引用的 HTML 文件裡掛上 `vault.js`；入口的 Markdown／文字／JSON 預覽也會遮罩。按「顯示」看 30 秒，按「複製」不顯示直接複製。解出的金鑰只存在該分頁的 `sessionStorage`，按「鎖定 vault」或關分頁就失效。
+- 入口的 Markdown／文字／JSON 預覽會遮罩引用：按「顯示」看 30 秒，按「複製」不顯示直接複製。解出的金鑰是不可匯出的 `CryptoKey`，只放在記憶體，重新整理或按「鎖定 vault」就失效。
+- 文件一律當成不可信：`/docs/*` 帶 `Content-Security-Policy: sandbox`（opaque origin），預覽也放在 sandbox iframe，文件裡的 script 碰不到入口、金鑰或 vault。HTML 文件會內嵌一小段 shim，只負責遮罩，按「顯示」時用 `postMessage` 請入口在入口自己的對話框顯示，明文不會進到文件。
 - 分享用 build（`--max-sensitivity=…`）和 `--no-vault` 不帶 vault，所有人都只看到遮罩。
 - 部署出去的密文安全性完全取決於密語，請用長密語，網站本身仍要放在登入保護後面。
 

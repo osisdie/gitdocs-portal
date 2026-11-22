@@ -1,7 +1,7 @@
 // gitdocs portal — hash-routed SPA over catalog.json + search-index.json (+ vault.json for masked fields).
 // Routes: #/list  #/summary  #/timeline  #/project/<name>  #/doc/<id>   — every route accepts ?p=<project[/sub]> as the global scope.
 import { parseQuery, matchDoc, needsBody, QUERY_HELP, SENSITIVITIES, sensRank } from './query.js';
-import { mask as vaultMask, lock as vaultLock, isUnlocked as vaultUnlocked } from './vault.js';
+import { mask as vaultMask, lock as vaultLock, isUnlocked as vaultUnlocked, revealDialog } from './vault.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -268,10 +268,23 @@ function viewProject(name) {
 }
 
 // ---------- doc detail ----------
+const DOC_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads';
+// A sandboxed HTML doc asks to show a vault field: accept only from the preview iframe of the open doc, and only for
+// names that doc references; the value is shown in the portal's dialog, never sent back.
+window.addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || m.type !== 'gitdocs:vault' || typeof m.name !== 'string') return;
+  const frame = document.querySelector('#pv iframe.preview');
+  const { view, arg } = parseHash();
+  const d = view === 'doc' ? byId(arg) : null;
+  if (!frame || e.source !== frame.contentWindow || !d?.vault?.includes(m.name)) return;
+  revealDialog(m.name, d.title);
+});
 const loadScript = (src) => new Promise((ok, fail) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
 async function renderPreview(d, pv) {
   const href = encodeURI(d.path);
-  if (d.type === 'html') { pv.innerHTML = `<iframe class="preview" src="${href}" title="${esc(d.title)}" loading="lazy"></iframe>`; return; }
+  // Documents are untrusted: sandboxed without allow-same-origin (the /docs/* CSP header enforces the same).
+  if (d.type === 'html') { pv.innerHTML = `<iframe class="preview" src="${href}" title="${esc(d.title)}" loading="lazy" sandbox="${DOC_SANDBOX}"></iframe>`; return; }
   pv.innerHTML = '<p class="loading">載入預覽…</p>';
   const text = await fetch(href).then((r) => r.text());
   if (d.type === 'md') {

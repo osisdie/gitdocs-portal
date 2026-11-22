@@ -8,8 +8,9 @@
 //     --max-sensitivity=<level> drops every doc above <level> entirely (for share builds; also drops the vault).
 //     --no-vault  do not deploy vault.json ({{vault:…}} fields then stay masked for everyone).
 //     --check  only reports what would change.
-//  4. Vault: vault/vault.json (ciphertext only) → dist/vault.json; HTML docs that reference {{vault:…}} get
-//     <script type="module" src="/vault.js"> so the masked fields can be revealed in the browser.
+//  4. Vault: vault/vault.json (ciphertext only) → dist/vault.json. HTML docs that reference {{vault:…}} get the
+//     site/vault-frame.js shim inlined: docs are served sandboxed (opaque origin, see site/_headers), so the shim only
+//     masks fields and asks the portal to show a value in the portal's own dialog — it never sees keys or plaintext.
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, CONTENT, DOCS, VAULT_FILE, SENSITIVITIES, sensRank, loadCatalog, saveCatalog, syncCatalog, toRecord, gitHistory } from './lib/catalog.mjs';
@@ -65,8 +66,8 @@ fs.cpSync(DOCS, DIST_DOCS, {
 });
 if (withVault) fs.copyFileSync(VAULT_FILE, path.join(DIST, 'vault.json'));
 
-// HTML docs with vault fields load the reveal widget (absolute path: docs live at any depth under /docs/).
-const TAG = '<script type="module" src="/vault.js"></script>';
+// HTML docs with vault fields get the masking shim inlined (a sandboxed doc cannot load portal scripts with cookies).
+const TAG = `<script>${fs.readFileSync(path.join(SITE, 'vault-frame.js'), 'utf8').replace(/<\/script/gi, '<\\/script')}</script>`;
 let injected = 0;
 for (const it of items) {
   if (it.type !== 'html' || !it.vaultRefs.length) continue;

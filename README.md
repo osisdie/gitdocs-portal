@@ -93,9 +93,13 @@ npm run vault -- ls | get <name> | rm <name> | mv <old> <new> | rekey | check
 - `vault/vault.json` holds only ciphertext and is committed, so secret changes are versioned too.
   Crypto: PBKDF2-SHA256 (600k iterations) → AES-256-GCM, with the secret's name as additional data so a
   ciphertext cannot be moved to another name. The same module (`site/vault-core.js`) runs in Node and the browser.
-- The build deploys `vault.json` and wires HTML documents that contain placeholders; the portal masks
-  placeholders in Markdown / text / JSON previews. **顯示** reveals for 30 s, **複製** copies without showing.
-  The derived key stays in `sessionStorage` for that tab until **鎖定 vault** or the tab closes.
+- The portal masks placeholders in Markdown / text / JSON previews: **顯示** reveals for 30 s, **複製** copies
+  without showing. The derived key is a non-extractable `CryptoKey` kept in memory only (gone on reload or
+  **鎖定 vault**).
+- Documents are treated as untrusted: `/docs/*` is served with `Content-Security-Policy: sandbox` (opaque origin)
+  and previewed in a sandboxed iframe, so a document's scripts can never reach the portal, the key or the vault.
+  HTML documents get a tiny inlined shim that masks fields and asks the portal (via `postMessage`) to show a value
+  in the portal's own dialog — the plaintext never enters the document.
 - Share builds (`--max-sensitivity=…`) and `--no-vault` leave the vault out: fields stay masked for everyone.
 - The passphrase is the whole security of the deployed ciphertext — use a long one, and keep the site behind
   authentication anyway.
